@@ -1,0 +1,6 @@
+{
+  "ext": "js, jsx, json",
+  "exec": "node service.js",
+  "ignore": ["node_modules"],
+  "watch": ["service", "static"]
+}
