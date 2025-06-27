@@ -1,4 +1,4 @@
-# Beam-Forming Simulation 5G/6G
+# NetRAG 5G/6G
 
 ## Overview
 This project simulates 5G/6G networks in a 3D environment along with a retrieval-augmented generation framework for reasoning. The simulation includes base stations, user equipment, and environmental obstructions.

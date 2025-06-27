@@ -13,7 +13,7 @@ const bsSelect = document.getElementById('bsSelect');
 
 // --- Simulation State ---
 let scene, camera, renderer, controls;
-let factoryFloor, obstacles = [], baseStations = [], agvs = [], beams = [];
+let factoryFloor, obstacles = [], gNodeBs = [], agvs = [], beams = [];
 let clock = new THREE.Clock();
 let lastLLMUpdateTime = 0;
 let isPaused = false;
@@ -55,7 +55,7 @@ function log(message, type = 'DEBUG') {
 }
 
 // --- Scene Creation ---
-function createFactoryEnvironment() {
+function createEnvironment() {
     // Floor
     const floorGeometry = new THREE.PlaneGeometry(simParams.areaSize, simParams.areaSize);
     const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x334433, side: THREE.DoubleSide }); // Dark green-ish
@@ -82,7 +82,7 @@ function createFactoryEnvironment() {
     log(`Created floor and ${simParams.obstacleDensity} obstacles.`);
 }
 
-function createBaseStation(id, position) {
+function createBS(id, position) {
     const bsGroup = new THREE.Group();
     bsGroup.position.copy(position);
     bsGroup.userData = {
@@ -127,7 +127,7 @@ function createBaseStation(id, position) {
     bsGroup.add(coverageSphere);
     bsGroup.castShadow = true;
 
-    baseStations.push(bsGroup);
+    gNodeBs.push(bsGroup);
     scene.add(bsGroup);
 
     // Add to dropdown
@@ -139,7 +139,7 @@ function createBaseStation(id, position) {
     return bsGroup;
 }
 
-function createAGV(id) {
+function createUE(id) {
     // Replace with GLTF loading for a proper AGV model
     const agvGeo = new THREE.BoxGeometry(1.5, 1, 2.5); // Simple AGV shape
     const agvMat = new THREE.MeshStandardMaterial({ color: 0xff4444 }); // Red-ish
@@ -205,7 +205,7 @@ function createBeam(bs, agv) {
 }
 
 // --- Simulation Logic ---
-function updateAGVMovement(agv, delta) {
+function updateUEMovement(agv, delta) {
     if (!agv.userData.waypoints || agv.userData.waypoints.length === 0) return;
 
     const targetWaypoint = agv.userData.waypoints[agv.userData.currentWaypointIndex];
@@ -227,7 +227,7 @@ function findClosestBS(agv) {
     let closestBS = null;
     let minDistanceSq = Infinity;
 
-    baseStations.forEach(bs => {
+    gNodeBs.forEach(bs => {
         const distSq = agv.position.distanceToSquared(bs.position);
         if (distSq < minDistanceSq) {
             minDistanceSq = distSq;
@@ -269,7 +269,7 @@ function updateBeamforming() {
     beams = [];
 
     // Create and steer new beams for each BS-AGV connection
-    baseStations.forEach(bs => {
+    gNodeBs.forEach(bs => {
         beamSteeringData[bs.userData.id] = { steering_angles: [] }; // Init for JSON
 
         agvs.forEach(agv => {
@@ -315,13 +315,13 @@ function updateBeamforming() {
     // Update Steering Prediction JSON display periodically
     const now = clock.getElapsedTime();
     if (now - lastLLMUpdateTime > simParams.llmQueryInterval / 1000) {
-        updatePredictionDisplay(beamSteeringData);
+        updatePredictions(beamSteeringData);
         log("Mock steering prediction computed.");
         lastLLMUpdateTime = now;
     }
 }
 
-function updatePredictionDisplay(data) {
+function updatePredictions(data) {
     const formattedData = { beamforming_solutions: [] };
     Object.keys(data).forEach(bsId => {
         formattedData.beamforming_solutions.push({
@@ -343,8 +343,87 @@ function updateStatsOverlay() {
     statsOverlay.innerHTML = `UE Coverage: ${coverage}% (${connectedAGVs}/${totalAGVs})<br>Avr. Bandwidth: ${avgBandwidth.toFixed(1)} Mbps`;
 }
 
-// --- UI and Event Handlers ---
-function setupUIListeners() {
+function handleParamChange(event) {
+    const id = event.target.id;
+    const value = event.target.type === 'range' ? parseFloat(event.target.value) : event.target.value;
+
+    // Parameters requiring simulation reset
+    const resetParams = ['ueDensity', 'bsDensity', 'areaSize', 'obstacleDensity'];
+    if (resetParams.includes(id)) {
+        simParams[id] = value;
+        clearScene();
+        resetSimulation();
+        log(`Parameter ${id} changed to ${value}. Resetting simulation.`);
+        return;
+    }
+
+    // Parameters affecting selected BS
+    const bsParams = ['bsHeight', 'bsAntennas', 'bsBandwidth'];
+
+    if (bsParams.includes(id) && simParams.selectedBsId) {
+        const selectedBS = gNodeBs.find(bs => 
+            bs.userData.id === simParams.selectedBsId);
+
+        // If a BS is selected
+        if (selectedBS) {
+            selectedBS.userData[id] = value;
+
+            if (id === 'bsHeight') {
+                selectedBS.position.y = value;
+                log(`Updated ${simParams.selectedBsId} height to ${value}`);
+            } else if (id === 'bsAntennas') {
+                log(`Updated ${simParams.selectedBsId} antennas to ${value} (visual update not implemented!)`, 'WARN');
+            } else {
+                log(`Updated ${simParams.selectedBsId} ${id} to ${value}`);
+            }
+        }
+    } else if (bsParams.includes(id)) {
+        simParams[id] = value;
+    }
+}
+
+function updateBSConfigPanel(bsId) {
+    const bs = gNodeBs.find(b => b.userData.id === bsId);
+    if (bs) {
+        document.getElementById('bsHeight').value = bs.userData.height;
+        document.getElementById('bsHeightValue').textContent = bs.userData.height;
+        document.getElementById('bsAntennas').value = bs.userData.antennas;
+        document.getElementById('bsAntennasValue').textContent = bs.userData.antennas;
+        document.getElementById('bsBandwidth').value = bs.userData.bandwidth;
+        document.getElementById('bsBandwidthValue').textContent = bs.userData.bandwidth;
+        document.getElementById('bs-configs').classList.remove('hidden');
+    } else {
+        document.getElementById('bs-configs').classList.add('hidden');       
+    }
+}
+
+function highlightSelectedBS(bsId) {
+    gNodeBs.forEach(bs => {
+        const coverageSphere = bs.getObjectByName("coverageSphere");
+        if (coverageSphere) {
+            if (bs.userData.id === bsId) {
+                coverageSphere.material.opacity = 0.15; // Make slightly more visible
+                coverageSphere.material.color.setHex(0xffff00); // Yellow highlight
+            } else {
+                coverageSphere.material.opacity = 0.05; // Default transparency
+                coverageSphere.material.color.setHex(0x0077ff); // Default blue
+            }
+        }
+    });
+}
+
+function onWindowResize() {
+    const newWidth = viewportContainer.clientWidth;
+    const newHeight = viewportContainer.clientHeight;
+
+    if (newWidth > 0 && newHeight > 0) { // Check dimensions are valid
+        camera.aspect = newWidth / newHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(newWidth, newHeight);
+    }
+}
+
+function setupListeners() {
     // Simulation Controls
     resetButton.addEventListener('click', resetSimulation);
     pauseButton.addEventListener('click', togglePause);
@@ -379,75 +458,6 @@ function setupUIListeners() {
     });
 }
 
-function handleParamChange(event) {
-    const id = event.target.id;
-    const value = event.target.type === 'range' ? parseFloat(event.target.value) : event.target.value;
-
-    // Parameters requiring simulation reset
-    const resetParams = ['ueDensity', 'bsDensity', 'areaSize', 'obstacleDensity'];
-    if (resetParams.includes(id)) {
-        simParams[id] = value;
-        clearScene();
-        resetSimulation();
-        log(`Parameter ${id} changed to ${value}. Resetting simulation.`);
-        return;
-    }
-
-    // Parameters affecting selected BS
-    const bsParams = ['bsHeight', 'bsAntennas', 'bsBandwidth'];
-
-    if (bsParams.includes(id) && simParams.selectedBsId) {
-        const selectedBS = baseStations.find(bs => 
-            bs.userData.id === simParams.selectedBsId);
-
-        // If a BS is selected
-        if (selectedBS) {
-            selectedBS.userData[id] = value;
-
-            if (id === 'bsHeight') {
-                selectedBS.position.y = value;
-                log(`Updated ${simParams.selectedBsId} height to ${value}`);
-            } else if (id === 'bsAntennas') {
-                log(`Updated ${simParams.selectedBsId} antennas to ${value} (visual update not implemented!)`, 'WARN');
-            } else {
-                log(`Updated ${simParams.selectedBsId} ${id} to ${value}`);
-            }
-        }
-    } else if (bsParams.includes(id)) {
-        simParams[id] = value;
-    }
-}
-
-function updateBSConfigPanel(bsId) {
-    const bs = baseStations.find(b => b.userData.id === bsId);
-    if (bs) {
-        document.getElementById('bsHeight').value = bs.userData.height;
-        document.getElementById('bsHeightValue').textContent = bs.userData.height;
-        document.getElementById('bsAntennas').value = bs.userData.antennas;
-        document.getElementById('bsAntennasValue').textContent = bs.userData.antennas;
-        document.getElementById('bsBandwidth').value = bs.userData.bandwidth;
-        document.getElementById('bsBandwidthValue').textContent = bs.userData.bandwidth;
-        document.getElementById('bs-configs').classList.remove('hidden');
-    } else {
-        document.getElementById('bs-configs').classList.add('hidden');       
-    }
-}
-
-function highlightSelectedBS(bsId) {
-    baseStations.forEach(bs => {
-        const coverageSphere = bs.getObjectByName("coverageSphere");
-        if (coverageSphere) {
-            if (bs.userData.id === bsId) {
-                coverageSphere.material.opacity = 0.15; // Make slightly more visible
-                coverageSphere.material.color.setHex(0xffff00); // Yellow highlight
-            } else {
-                coverageSphere.material.opacity = 0.05; // Default transparency
-                coverageSphere.material.color.setHex(0x0077ff); // Default blue
-            }
-        }
-    });
-}
-
 function togglePause() {
     isPaused = !isPaused;
     pauseButton.innerHTML = isPaused ? `<i class="fas fa-play"></i> Start` : `<i class="fas fa-pause"></i> Pause`;
@@ -455,60 +465,7 @@ function togglePause() {
     pauseButton.classList.toggle('bg-yellow-600', !isPaused);
     pauseButton.classList.toggle('hover:bg-blue-700', isPaused);
     pauseButton.classList.toggle('hover:bg-yellow-700', !isPaused);
-    log(isPaused ? "Simulation paused!" : "Simulation running...");
-}
-
-function resetSimulation() {
-    isPaused = true; 
-    log("Resetting simulation...");
-    pauseButton.innerHTML = `<i class="fas fa-play"></i> Start`;
-    pauseButton.classList.add('bg-yellow-600', 'hover:bg-yellow-700');
-    pauseButton.classList.remove('bg-blue-600', 'hover:bg-blue-700');
-
-    // Read current values from sliders that trigger reset
-    simParams.areaSize = parseFloat(document.getElementById('areaSize').value);
-    simParams.bsDensity = parseInt(document.getElementById('bsDensity').value);
-    simParams.ueDensity = parseInt(document.getElementById('ueDensity').value);
-    simParams.obstacleDensity = parseInt(document.getElementById('obstacleDensity').value);
-
-    clearScene(); // Remove existing objects
-    createFactoryEnvironment();
-
-    // Create Base Stations
-    bsSelect.innerHTML = '<option value="">Select</option>'; // Clear dropdown
-    for (let i = 0; i < simParams.bsDensity; i++) {
-        const angle = (i / simParams.bsDensity) * Math.PI * 2;
-        const radius = simParams.areaSize * 0.35;
-        const position = new THREE.Vector3(
-            Math.cos(angle) * radius,
-            simParams.bsHeight, // Use current height setting
-            Math.sin(angle) * radius
-        );
-        createBaseStation(`gNodeB${i + 1}`, position);
-    }
-
-    // Select the first BS by default if available
-    if (baseStations.length > 0) {
-        simParams.selectedBsId = baseStations[0].userData.id;
-        bsSelect.value = simParams.selectedBsId;
-        updateBSConfigPanel(simParams.selectedBsId);
-        highlightSelectedBS(simParams.selectedBsId);
-    } else {
-        simParams.selectedBsId = null;
-        updateBSConfigPanel(null);
-    }
-
-    // Create AGVs
-    for (let i = 0; i < simParams.ueDensity; i++) {
-        createAGV(`AGV${i + 1}`);
-    }
-
-    // Reset camera slightly
-    camera.position.set(simParams.areaSize * 0.7, simParams.areaSize * 0.6, simParams.areaSize * 0.7);
-    controls.target.set(0, simParams.bsHeight / 4, 0); // Look towards center slightly raised
-    controls.update();
-    lastLLMUpdateTime = 0; // Reset mock LLM timer
-    log(`Created ${simParams.bsDensity} BS and ${simParams.ueDensity} AGVs.`);
+    log(isPaused ? "Simulation paused!" : "Simulation running...", "WARN");
 }
 
 function clearScene() {
@@ -526,8 +483,8 @@ function clearScene() {
     beams = [];
 
     // Remove Base Stations
-    baseStations.forEach(bs => scene.remove(bs));
-    baseStations = [];
+    gNodeBs.forEach(bs => scene.remove(bs));
+    gNodeBs = [];
 
     // Remove Obstacles
     obstacles.forEach(obs => scene.remove(obs));
@@ -542,19 +499,59 @@ function clearScene() {
     steeringJsonContainer.textContent = '{\n  "beamforming_solutions": []\n}';
 }
 
-// --- Window Resize ---
-function onWindowResize() {
-    const newWidth = viewportContainer.clientWidth;
-    const newHeight = viewportContainer.clientHeight;
+function resetSimulation() {
+    isPaused = true; 
+    log("Resetting simulation...");
+    pauseButton.innerHTML = `<i class="fas fa-play"></i> Start`;
+    pauseButton.classList.add('bg-yellow-600', 'hover:bg-yellow-700');
+    pauseButton.classList.remove('bg-blue-600', 'hover:bg-blue-700');
 
-    if (newWidth > 0 && newHeight > 0) { // Check dimensions are valid
-        camera.aspect = newWidth / newHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(newWidth, newHeight);
+    // Read current values from sliders that trigger reset
+    simParams.areaSize = parseFloat(document.getElementById('areaSize').value);
+    simParams.bsDensity = parseInt(document.getElementById('bsDensity').value);
+    simParams.ueDensity = parseInt(document.getElementById('ueDensity').value);
+    simParams.obstacleDensity = parseInt(document.getElementById('obstacleDensity').value);
+
+    clearScene(); // Remove existing objects
+    createEnvironment();
+
+    // Create Base Stations
+    bsSelect.innerHTML = '<option value="">Select</option>'; // Clear dropdown
+    for (let i = 0; i < simParams.bsDensity; i++) {
+        const angle = (i / simParams.bsDensity) * Math.PI * 2;
+        const radius = simParams.areaSize * 0.35;
+        const position = new THREE.Vector3(
+            Math.cos(angle) * radius,
+            simParams.bsHeight, // Use current height setting
+            Math.sin(angle) * radius
+        );
+        createBS(`gNodeB${i + 1}`, position);
     }
+
+    // Select the first BS by default if available
+    if (gNodeBs.length > 0) {
+        simParams.selectedBsId = gNodeBs[0].userData.id;
+        bsSelect.value = simParams.selectedBsId;
+        updateBSConfigPanel(simParams.selectedBsId);
+        highlightSelectedBS(simParams.selectedBsId);
+    } else {
+        simParams.selectedBsId = null;
+        updateBSConfigPanel(null);
+    }
+
+    // Create AGVs
+    for (let i = 0; i < simParams.ueDensity; i++) {
+        createUE(`AGV${i + 1}`);
+    }
+
+    // Reset camera slightly
+    camera.position.set(simParams.areaSize * 0.7, simParams.areaSize * 0.6, simParams.areaSize * 0.7);
+    controls.target.set(0, simParams.bsHeight / 4, 0); // Look towards center slightly raised
+    controls.update();
+    lastLLMUpdateTime = 0; // Reset mock LLM timer
+    log(`Created ${simParams.bsDensity} BS and ${simParams.ueDensity} AGVs.`);
 }
 
-// --- Animation Loop ---
 function animateFrame() {
     requestAnimationFrame(animateFrame);
     const delta = clock.getDelta();
@@ -562,7 +559,7 @@ function animateFrame() {
     if (isPaused === false) {
         // Update AGV movement
         agvs.forEach(agv => { 
-            updateAGVMovement(agv, delta); 
+            updateUEMovement(agv, delta); 
         });
 
         // Update beamforming 
@@ -577,7 +574,6 @@ function animateFrame() {
     renderer.render(scene, camera);
 }
 
-// --- Initialization ---
 function initialize() {
     log("Initializing simulation...");
 
@@ -632,12 +628,11 @@ function initialize() {
     // Resize listener
     window.addEventListener('resize', onWindowResize, false);
 
-    setupUIListeners();
+    setupListeners();
     resetSimulation();
     animateFrame();
 
     log("Initialization complete!", "SUCCESS");
 }
 
-// --- Initialize simulation ---
 initialize();
