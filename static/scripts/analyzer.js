@@ -65,7 +65,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function displayGraph(graph) {
         // Validate graph data
         if (!graph || !graph.nodes || !graph.links) {
-            alert("Invalid graph data!");
+            console.error("Invalid graph data!");
             return;
         }
 

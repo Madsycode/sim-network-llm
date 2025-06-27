@@ -31,7 +31,7 @@
     </div>
 
     <!-- Header -->
-    <header class="flex-shrink-0 flex justify-between items-center h-16 p-6 border-b border-slate-700/50 bg-slate-800/70 backdrop-blur-sm shadow-lg z-10">
+    <header class="flex-shrink-0 flex justify-between items-center h-16 p-6 border-b border-slate-700/70 bg-slate-800/70 backdrop-blur-sm shadow-lg z-10">
         <a href="#" target="_blank">
             <div class="flex items-center gap-3"> 
                 <img src="imgs/dfki.png" alt="DFKI Logo"
@@ -49,34 +49,34 @@
     <div class="flex flex-1 overflow-hidden">
         <!-- Sidebar -->
         <aside
-            class="w-60 bg-slate-800/80 backdrop-blur-sm flex-shrink-0 flex flex-col justify-between border-r border-slate-700/50">
+            class="w-60 bg-slate-800/80 backdrop-blur-sm flex-shrink-0 flex flex-col justify-between border-r border-slate-700/70">
             <nav class="mt-6 flex flex-col gap-2 px-4">
                 <a href="#sim"
                     class="sidebar-link group flex items-center px-4 py-3 rounded-md transition-all duration-200 text-slate-400 hover:bg-slate-700 hover:text-slate-100 active">
                     <i class="fas fa-cube w-8 text-center mr-2 text-lg group-hover:text-blue-400 transition-colors duration-200"></i>
                     <span class="font-medium">Vizualizer</span>
                 </a>
-                <a href="#chats"
-                    class="sidebar-link group flex items-center px-4 py-3 rounded-md transition-all duration-200 text-slate-400 hover:bg-slate-700 hover:text-slate-100 active">
-                    <i class="fas fa-chart-line w-8 text-center mr-2 text-lg group-hover:text-blue-400 transition-colors duration-200"></i>
-                    <span class="font-medium">Analyzer</span>
-                </a>
                 <a href="#graph"
                     class="sidebar-link group flex items-center px-4 py-3 rounded-md transition-all duration-200 text-slate-400 hover:bg-slate-700 hover:text-slate-100">
                     <i class="fas fa-database w-8 text-center mr-2 text-lg group-hover:text-blue-400 transition-colors duration-200"></i>
                     <span class="font-medium">Database</span>
                 </a>
+                <a href="#chats"
+                    class="sidebar-link group flex items-center px-4 py-3 rounded-md transition-all duration-200 text-slate-400 hover:bg-slate-700 hover:text-slate-100 active">
+                    <i class="fas fa-chart-line w-8 text-center mr-2 text-lg group-hover:text-blue-400 transition-colors duration-200"></i>
+                    <span class="font-medium">Analyzer</span>
+                </a>
+                <a href="#settings"
+                class="sidebar-link group flex items-center px-4 py-3 rounded-md transition-all duration-200 text-slate-400 hover:bg-slate-700 hover:text-slate-100">
+                <i class="fas fa-cog w-8 text-center mr-2 text-lg group-hover:text-blue-400 transition-colors duration-200"></i>
+                    <span class="font-medium">Settings</span>
+                </a>
+            </nav>
+            <div class="p-4 border-t border-slate-700/70">
                 <a href="#about"
                     class="sidebar-link group flex items-center px-4 py-3 rounded-md transition-all duration-200 text-slate-400 hover:bg-slate-700 hover:text-slate-100">
                     <i class="fas fa-info-circle w-8 text-center mr-2 text-lg group-hover:text-blue-400 transition-colors duration-200"></i>
                     <span class="font-medium">About</span>
-                </a>
-            </nav>
-            <div class="p-4 border-t border-slate-700/50">
-                <a href="#settings"
-                    class="sidebar-link group flex items-center px-4 py-3 rounded-md transition-all duration-200 text-slate-400 hover:bg-slate-700 hover:text-slate-100">
-                    <i class="fas fa-cog w-8 text-center mr-2 text-lg group-hover:text-blue-400 transition-colors duration-200"></i>
-                    <span class="font-medium">Settings</span>
                 </a>
             </div>
         </aside>
@@ -85,112 +85,98 @@
         <main class="flex-1 flex flex-col bg-slate-900/80">
             <!-- Content Sections -->             
             <div class="flex-1 overflow-y-auto p-4 md:p-4">
+
                <!--------------- Simulation Section ----------------->                     
                 <section id="sim" class="h-full">
-                    <div class="flex flex-1 overflow-hidden h-full">
-                        <!-- Simulation Canvas -->
-                        <main class="flex-1 flex flex-col overflow-hidden">                            
-                            <!-- Simulation Viewport -->
-                            <div class="flex-1 relative mr-4 bg-slate-800/70 border border-slate-700/50">
-                                <div id="simViewport" class="w-full h-full">
-                                    <!-- Three.js Canvas will be inserted here -->
-                                </div>
-                                <div id="statsOverlay">
-                                    UE Coverage: 0.0% (0/0)<br>
-                                    Avr. Bandwidth: 0.0 Mbps
-                                </div>
+                    <div class="flex flex-1 overflow-hidden h-full space-x-4">
+                        
+                        <main class="flex-1 flex flex-col overflow-hidden">
+                            <div id="simViewport" class="w-full h-full rounded border border-slate-700/70">
+                                <div id="statsOverlay"></div>
                             </div>
-
-                            <!-- Simulation Logs -->
-                            <div class="p-2 rounded mt-4 mr-4 shadow border border-slate-700/50 bg-slate-800/70">
-                                <h3 class="text-md font-semibold mb-2 text-blue-400"><i class="fas fa-code"></i> Simulation Logs</h3>
-                                <div id="simulationLogs" class="h-32 text-xs p-2 bg-slate-900 border border-slate-700/50 overflow-auto break-words">
-                                    <!-- Simulation logs will be inserted here -->
-                                </div>
+                            <div id="simulationLogs-container" class="p-2 rounded mt-4 shadow border border-slate-700/70 bg-slate-800/70">
+                                <h3 class="text-md font-semibold pb-2 text-blue-400">
+                                    <i class="fas fa-terminal"></i> Console</h3>
+                                <div id="simulationLogs" class="h-48 text-xs p-2 bg-slate-900 border border-slate-700/70 overflow-auto break-words""></div>
                             </div>
                         </main>
 
-                        <!-- Right Panel -->
-                        <aside class="w-80 bg-slate-800/70 p-2 space-y-2 border border-slate-700/50 overflow-y-auto">
-                            <!-- Simulation Controls -->
-                            <div class="bg-slate-900 border border-slate-700/50 p-2 rounded shadow">                               
-                                <div class="flex justify-around space-x-2">
-                                    <button id="pauseButton" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm">
-                                        <i class="fas fa-play"></i> Start
-                                    </button>
-                                    <button id="resetButton" class="flex-1 bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm">
-                                        <i class="fas fa-undo"></i> Reset
-                                    </button>
-                                    <button id="restartButton" class="flex-1 bg-yellow-500 hover:bg-yellow-600 text-black px-3 py-1 rounded text-sm">
-                                        <i class="fas fa-redo"></i> Restart
-                                    </button>                                  
-                                </div>
+                        <aside id="sidebars" class="w-96 bg-slate-800/80 p-2 space-y-2 border border-slate-700/70 overflow-y-auto">                                                      
+                            <div class="flex justify-around space-x-2 bg-slate-900 border border-slate-700/70 p-4 rounded shadow">
+                                <button id="pauseButton" class="flex-1 bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-sm">
+                                    <i class="fas fa-play"></i> Start
+                                </button>
+                                <button id="restartButton" class="flex-1 bg-gray-500 hover:bg-yellow-600 px-3 py-1 rounded text-sm">
+                                    <i class="fas fa-redo"></i> Reset
+                                </button>                                  
                             </div>
 
-                            <!-- Simulation Configs -->
-                            <div class="bg-slate-900 border border-slate-700/50 p-4 rounded shadow">
-                                <h3 class="text-md border-b border-slate-700/50 font-semibold pb-2 mb-2 text-blue-400">
-                                    <i class="fas fa-gear"></i> Simulation Configs</h3>    
-
-                                <div class="space-y-1 text-sm">                           
-                                    <div>
-                                        <label for="ueDensity" class="block mb-1">UE Density: <span id="ueDensityValue">5</span></label>
-                                        <input type="range" id="ueDensity" min="1" max="20" value="5" step="1" class="w-full">
-                                    </div>
-                                    <div>
-                                        <label for="ueSpeed" class="block mb-1">UE Speed (m/s): <span id="ueSpeedValue">2</span></label>
-                                        <input type="range" id="ueSpeed" min="0.1" max="5" value="2" step="0.1" class="w-full">
-                                    </div>
-                                    <div>
-                                        <label for="bsDensity" class="block mb-1">gNodeB Density: <span id="bsDensityValue">3</span></label>
-                                        <input type="range" id="bsDensity" min="1" max="10" value="3" step="1" class="w-full">
-                                    </div>
-                                    <div>
-                                        <label for="areaSize" class="block mb-1">Factory Area (m²): <span id="areaSizeValue">100</span></label>
-                                        <input type="range" id="areaSize" min="50" max="300" value="100" step="10" class="w-full">
-                                    </div>
-                                    <div>
-                                        <label for="obstacleDensity" class="block mb-1">Obstacle Density: <span id="obstacleDensityValue">15</span></label>
-                                        <input type="range" id="obstacleDensity" min="0" max="50" value="15" step="1" class="w-full" title="Number of simple obstacle blocks">
-                                    </div>   
-                                </div>                            
-                            </div>
-
-                            <!-- Base Station Configs -->
-                            <div class="bg-slate-900 border border-slate-700/50 p-4 rounded shadow">
-                                <h3 class="text-md font-semibold border-b border-slate-700/50 pb-2 mb-2 text-blue-400">
-                                    <i class="fas fa-gear"></i> gNodeB Configs</h3>
+                            <div class="bg-slate-900 border border-slate-700/70 px-4 pt-4 rounded shadow">
+                                <h3 class="text-md border-b border-slate-700/70 font-semibold pb-2 mb-2 text-blue-400">
+                                    <i class="fas fa-gears"></i> Simulation Configs</h3>                                
                                 
-                                <!-- Select gNodeB -->                                                                    
-                                <select id="bsSelect" class="w-full px-2 py-1 mb-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-blue-500">
-                                    <!-- Options will be populated by JS -->
-                                </select>                                
+                                <div class="flex items-center mb-2">
+                                    <label for="factoryArea">Area (m<sup>2</sup>): <span id="factoryAreaValue">100</span></label>
+                                    <input type="range" id="factoryArea" name="factoryArea" min="100" max="1000" value="100" step="10">
+                                </div>
+                                <div class="flex items-center mb-2">
+                                    <label for="bgDensity">gNodeBs: <span id="bsDensityValue">4</span></label>
+                                    <input type="range" id="bsDensity" name="bsDensity" min="1" max="4" value="4" step="1">
+                                </div>
+                                <div class="flex items-center mb-2">
+                                    <label for="bgDensity">AGVs: <span id="ueDensityValue">5</span></label>
+                                    <input type="range" id="ueDensity" name="ueDensity" min="1" max="10" value="5" step="1">
+                                </div>
+                                <div class="flex items-center mb-2">
+                                    <label for="rotate">Spin: <span id="rotateSpeedValue">0</span></label>
+                                    <input type="range" id="rotateSpeed" name="rotate" min="0" max="1" value="0" step="0.1">
+                                </div>
+                            </div>
+                        
+                            <div class="bg-slate-900 border border-slate-700/70 px-4 pt-4 rounded shadow">
+                                <h3 class="text-md border-b border-slate-700/70 font-semibold pb-2 mb-2 text-blue-400">
+                                    <i class="fas fa-tower-cell"></i> gNodeB Profile</h3>
+                                
+                                <select id="bsSelect" class="w-full px-2 py-1 mb-2 bg-slate-800/100 border border-gray-600 rounded text-sm focus:outline-none focus:border-blue-500">
+                                    <option value="">None</option>
+                                </select>
 
-                                <!-- gNodeB Configs -->
-                                <div id="bs-configs" class="space-y-1 text-sm">
-                                    <div>
-                                        <label for="bsHeight" class="block mb-1">Tower Height (m): <span id="bsHeightValue">10</span></label>
-                                        <input type="range" id="bsHeight" min="1" max="50" value="10" step="1" class="w-full">
-                                    </div>
-                                    <div>
-                                        <label for="bsBandwidth" class="block mb-1">Bandwidth (MHz): <span id="bsBandwidthValue">100</span></label>
-                                        <input type="range" id="bsBandwidth" min="10" max="400" value="100" step="10" class="w-full">
-                                    </div>
-                                    <div>
-                                        <label for="bsAntennas" class="block mb-1">Antennas (N): <span id="bsAntennasValue">8</span></label>
-                                        <input type="range" id="bsAntennas" min="1" max="4" value="3" step="1" class="w-full">
-                                    </div>                                 
+                                <div id="bs-configs" class="hidden">
+                                    <div class="info-field"><strong>Band:</strong><span id="bsBand"></span></div>
+                                    <div class="info-field"><strong>Load:</strong><span id="bsLoad"></span></div>
+                                    <div class="info-field"><strong>Status:</strong><span id="bsStatus"></span></div>
+                                    <div class="info-field"><strong>Vendor:</strong><span id="bsVendor"></span></div>
+                                    <div class="info-field"><strong>Position:</strong><span id="bsPosition"></span></div>
+                                    <div class="info-field"><strong>Connected UEs:</strong><span id="bsConnectedUes"></span></div>
                                 </div>
                             </div>
 
-                            <!-- Steering Prediction -->
-                            <div class="bg-slate-900 border border-slate-700/50 p-4 rounded shadow flex-1 flex flex-col">
-                                <h3 class="text-md font-semibold mb-2 pb-2 text-blue-400">
-                                    <i class="fas fa-gear"></i> Beam-Prediction</h3>
-                                <pre id="steeringJson" class="bg-slate-700/50 p-2 rounded text-xs text-gray-300 whitespace-pre-wrap flex-1 json-panel">
-                                    <!-- JSON will be populated by JS -->
-                                </pre>
+                            <div class="bg-slate-900 border border-slate-700/70 px-4 pt-4 rounded shadow">
+                                <h3 class="text-md border-b border-slate-700/70 font-semibold pb-2 mb-2 text-blue-400">
+                                    <i class="fas fa-robot"></i> AGV Profile</h3>
+
+                                <select id="ueSelect" class="w-full px-2 py-1 mb-2 800/100 border border-gray-600 rounded text-sm focus:outline-none focus:border-blue-500">
+                                    <option value="">None</option>
+                                </select>
+
+                                <div id="ue-configs" class="hidden">
+                                    <div class="info-field"><strong>IMEI:</strong><span id="ueImei"></span></div>
+                                    <div class="info-field"><strong>SINR:</strong><span id="ueSINR"></span></div>
+                                    <div class="info-field"><strong>Task:</strong><span id="ueTask"></span></div>
+                                    <div class="info-field"><strong>RSRP:</strong><span id="ueRSRP"></span></div>
+                                    <div class="info-field"><strong>Speed:</strong><span id="ueSpeed"></span></div>
+                                    <div class="info-field"><strong>Status:</strong><span id="ueStatus"></span></div>
+                                    <div class="info-field"><strong>Battery:</strong><span id="ueBattery"></span></div>
+                                    <div class="info-field"><strong>Position:</strong><span id="uePosition"></span></div>
+                                    <div class="info-field"><strong>Throughput:</strong><span id="ueThroughput"></span></div>
+                                    <div class="info-field"><strong>Connected to:</strong><span id="ueConnectedBs"></span></div>
+                                </div>
                             </div>
+                            <!-- <div id="simulationLogs-container" class="bg-slate-900 p-4 rounded shadow">
+                                <h3 class="text-md font-semibold pb-2 text-blue-400">
+                                    <i class="fas fa-terminal"></i> Console</h3>
+                                <div id="simulationLogs" class="h-40 text-xs p-2 bg-slate-800/100 rounded overflow-auto break-words"></div>
+                            </div> -->
                         </aside>
                     </div>
                 </section>
@@ -212,22 +198,22 @@
                         </div>
 
                         <div id="results-container" class="w-full max-w-7xl mx-auto space-y-4 hidden">   
-                            <div class="bg-slate-700/50 p-6 rounded shadow-md border border-slate-700/50">
+                            <div class="bg-slate-700/70 p-6 rounded shadow-md border border-slate-700/70">
                                 <h2 class="text-lg font-semibold text-blue-400 mb-3 border-b border-slate-700 pb-2 flex items-center gap-3">
                                     <i class="fas fa-question-circle"></i>Submitted Question</h2>
                                 <pre><code id="user-question">How many nodes are there in the graph?</code></pre>
                             </div>                        
-                            <div class="bg-slate-700/50 p-6 rounded shadow-md border border-slate-700/50">
+                            <div class="bg-slate-700/70 p-6 rounded shadow-md border border-slate-700/70">
                                 <h2 class="text-lg font-semibold text-blue-400 mb-3 border-b border-slate-700 pb-2 flex items-center gap-3">
                                     <i class="fas fa-database text-blue-400"></i>Generated Query</h2>
                                 <pre><code id="generated-cypher">MATCH (n) RETURN n LIMIT 5</code></pre>
                             </div>
-                            <div class="bg-slate-700/50 p-6 rounded shadow-md border border-slate-700/50">
+                            <div class="bg-slate-700/70 p-6 rounded shadow-md border border-slate-700/70">
                                 <h2 class="text-lg font-semibold text-blue-400 mb-3 border-b border-slate-700 pb-2 flex items-center gap-3">
                                     <i class="fas fa-sitemap text-blue-400"></i>Query Results</h2>
                                 <pre><code id="knowledge-results">[{ "type": "gNodeB", ... }]</code></pre>
                             </div>
-                            <div class="bg-slate-700/50 p-6 rounded shadow-md border border-slate-700/50">
+                            <div class="bg-slate-700/70 p-6 rounded shadow-md border border-slate-700/70">
                                 <h2 class="text-lg font-semibold text-blue-400 mb-3 border-b border-slate-700 pb-2 flex items-center gap-3">
                                     <i class="fas fa-robot text-blue-400"></i>Final Response
                                 </h2>                               
@@ -247,7 +233,7 @@
                     <!-- Input Form -->
                     <div class="flex-shrink-0 w-full max-w-7xl mx-auto mt-4">
                         <form id="query-form" class="relative">
-                            <div class="bg-slate-800/70 backdrop-blur-sm rounded shadow-lg flex items-center p-2 border border-slate-700/50 focus-within:ring-2 focus-within:ring-blue-500 transition-all duration-200">
+                            <div class="bg-slate-800/70 backdrop-blur-sm rounded shadow-lg flex items-center p-2 border border-slate-700/70 focus-within:ring-2 focus-within:ring-blue-500 transition-all duration-200">
                                 <input type="text" id="question-input" placeholder="e.g., How many base stations are there?"
                                     class="flex-1 bg-transparent px-4 py-2 text-slate-200 placeholder-slate-500 focus:outline-none w-full">
                                 <button type="submit"

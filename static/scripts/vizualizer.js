@@ -1,638 +1,628 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-// --- DOM Elements ---
-const steeringJsonContainer = document.getElementById('steeringJson');
-const viewportContainer = document.getElementById('simViewport');
-const logsContainer = document.getElementById('simulationLogs');
-const restartButton = document.getElementById('restartButton');
-const statsOverlay = document.getElementById('statsOverlay');
-const pauseButton = document.getElementById('pauseButton');
-const resetButton = document.getElementById('resetButton');
-const bsSelect = document.getElementById('bsSelect');
-
-// --- Simulation State ---
-let scene, camera, renderer, controls;
-let factoryFloor, obstacles = [], gNodeBs = [], agvs = [], beams = [];
-let clock = new THREE.Clock();
-let lastLLMUpdateTime = 0;
-let isPaused = false;
-
-let simParams = {
-    areaSize: 100,
-    bsDensity: 3,
-    ueDensity: 5,
-    obstacleDensity: 15,
-    ueSpeed: 2,
-    selectedBsId: null,
-    bsHeight: 10,
-    bsAntennas: 3, 
-    bsBandwidth: 100,
-    llmQueryInterval: 5000, // Mock update interval
+const CONFIGS = {
+    vendors: ['Ericsson', 'Nokia', 'Huawei', 'Samsung'],
+    bands: [{ name: 'n78', freq: 3500 }, { name: 'n257', freq: 28000 }, { name: 'n258', freq: 26000 }],
+    agvTasks: ['Transporting Parts', 'Material Supply', 'Waste Removal', 'Tool Delivery', 'Assembly Transfer'],
+    pathLoss: { referenceDistance: 1.0, referenceLoss: 32.45, exponent: 2.5, obstacleShadowLoss: 10 },
+    thermalNoiseDBM: -174, handoverMarginDB: 3, bsTxPowerDBM: 23,
 };
 
-// --- Logging Function ---
-function log(message, type = 'DEBUG') {
-    const time = new Date().toLocaleTimeString();
-    const entry = document.createElement('div');
+const UTILS = {
+    estimateThroughput: (sinr_db) => {
+        const linear_sinr = Math.pow(10, sinr_db / 10);
+        const spectral_efficiency = Math.log2(1 + linear_sinr);
+        return Math.min(spectral_efficiency * 20, 400) * (0.8 + Math.random() * 0.2);
+    },
 
-    if (type === 'WARN') entry.style.color = '#facc15';
-    if (type === 'ERROR') entry.style.color = '#f87171';
-    if (type === 'DEBUG') entry.style.color = '#9ca3af';
-    if (type === 'SUCCESS') entry.style.color = '#34d399';
+    getSINRColor: (sinr) => {
+        if (sinr > 15) return new THREE.Color(0x00ff00);    // Excellent
+        if (sinr > 5) return new THREE.Color(0xffff00);     // Good
+        if (sinr >-5) return new THREE.Color(0xffa500);     // Fair
+        return new THREE.Color(0xff0000);                   // Poor
+    },
     
-    entry.innerHTML = `[${time}] ${message}`;
-    logsContainer.appendChild(entry);
+    generateImei: () => '35824005' + Math.floor(1000000 + Math.random() * 9000000),
+    getRandom: (arr) => arr[Math.floor(Math.random() * arr.length)],
+    clamp: (val, min, max) => Math.max(min, Math.min(val, max)),
+    dbmToWatts: (dbm) => Math.pow(10, (dbm - 30) / 10),
+};
 
-    // Auto-scroll to bottom
-    logsContainer.scrollTop = logsContainer.scrollHeight;
+class Simulation {
+    constructor() {
+        this.dom = { 
+            restartButton: document.getElementById('restartButton'),
+            bsConfigPanel: document.getElementById('bs-configs'), 
+            ueConfigPanel: document.getElementById('ue-configs'), 
+            rotateSpeed: document.getElementById('rotateSpeed'),
+            factoryArea: document.getElementById('factoryArea'),
+            pauseButton: document.getElementById('pauseButton'), 
+            viewport: document.getElementById('simViewport'), 
+            ueDensity: document.getElementById('ueDensity'),
+            bsDensity: document.getElementById('bsDensity'), 
+            logs: document.getElementById('simulationLogs'), 
+            stats: document.getElementById('statsOverlay'), 
+            ueSelect: document.getElementById('ueSelect'), 
+            bsSelect: document.getElementById('bsSelect') 
+        };
 
-    // Limit log lines (optional)
-    const maxLines = 100;
-    while (logsContainer.childNodes.length > maxLines) {
-        logsContainer.removeChild(logsContainer.firstChild);
-    }
-}
-
-// --- Scene Creation ---
-function createEnvironment() {
-    // Floor
-    const floorGeometry = new THREE.PlaneGeometry(simParams.areaSize, simParams.areaSize);
-    const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x334433, side: THREE.DoubleSide }); // Dark green-ish
-    factoryFloor = new THREE.Mesh(floorGeometry, floorMaterial);
-    factoryFloor.rotation.x = -Math.PI / 2;
-    factoryFloor.receiveShadow = true;
-    scene.add(factoryFloor);
-
-    // Simple Obstacles (representing workstations, storage)
-    const obstacleGeo = new THREE.BoxGeometry(5, 10, 5); // Example size
-    const obstacleMat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa }); // Grey
-    for (let i = 0; i < simParams.obstacleDensity; i++) {
-        const obs = new THREE.Mesh(obstacleGeo, obstacleMat.clone()); // Clone material for potential color variations
-        obs.position.set(
-            (Math.random() - 0.5) * simParams.areaSize * 0.8,
-            5, // Height / 2
-            (Math.random() - 0.5) * simParams.areaSize * 0.8
-        );
-            obs.castShadow = true;
-            obs.receiveShadow = true;
-        obstacles.push(obs);
-        scene.add(obs);
-    }
-    log(`Created floor and ${simParams.obstacleDensity} obstacles.`);
-}
-
-function createBS(id, position) {
-    const bsGroup = new THREE.Group();
-    bsGroup.position.copy(position);
-    bsGroup.userData = {
-        id: id,
-        type: 'gNodeB',
-        height: simParams.bsHeight,
-        antennas: simParams.bsAntennas,
-        bandwidth: simParams.bsBandwidth
-    };
-
-    // Mast
-    const mastGeo = new THREE.CylinderGeometry(0.5, 0.5, position.y, 8);
-    const mastMat = new THREE.MeshStandardMaterial({ color: 0x888888 });
-    const mast = new THREE.Mesh(mastGeo, mastMat);
-    mast.position.y = -position.y / 2; // Position relative to group center
-        mast.castShadow = true;
-    bsGroup.add(mast);
-
-    // Antenna Array Representation (simple spheres in a circle)
-    const radius = 1.0;
-    const antennaGeo = new THREE.SphereGeometry(0.2, 8, 8);
-    const antennaMat = new THREE.MeshStandardMaterial({ color: 0xffcc00 }); // Yellow
-    for (let i = 0; i < simParams.bsAntennas; i++) {
-        const angle = (i / simParams.bsAntennas) * Math.PI * 2;
-        const antenna = new THREE.Mesh(antennaGeo, antennaMat);
-        antenna.position.set(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
-        bsGroup.add(antenna);
-    }
-
-        // Coverage Visualization (Semi-transparent sphere)
-    const coverageRadius = simParams.areaSize * 0.3; // Example radius
-    const coverageGeo = new THREE.SphereGeometry(coverageRadius, 32, 16);
-    const coverageMat = new THREE.MeshBasicMaterial({
-        color: 0x0077ff,
-        transparent: true,
-        opacity: 0.05, // Very transparent
-        side: THREE.DoubleSide,
-        depthWrite: false // Avoid hiding objects behind it
-    });
-    const coverageSphere = new THREE.Mesh(coverageGeo, coverageMat);
-    coverageSphere.name = "coverageSphere";
-    bsGroup.add(coverageSphere);
-    bsGroup.castShadow = true;
-
-    gNodeBs.push(bsGroup);
-    scene.add(bsGroup);
-
-    // Add to dropdown
-    const option = document.createElement('option');
-    option.value = id;
-    option.textContent = id;
-    bsSelect.appendChild(option);
-
-    return bsGroup;
-}
-
-function createUE(id) {
-    // Replace with GLTF loading for a proper AGV model
-    const agvGeo = new THREE.BoxGeometry(1.5, 1, 2.5); // Simple AGV shape
-    const agvMat = new THREE.MeshStandardMaterial({ color: 0xff4444 }); // Red-ish
-    const agv = new THREE.Mesh(agvGeo, agvMat);
-    agv.castShadow = true;
-    agv.receiveShadow = true;
-
-    // Initial random position on floor
-    agv.position.set(
-        (Math.random() - 0.5) * simParams.areaSize * 0.9,
-        0.5, // Place slightly above floor
-        (Math.random() - 0.5) * simParams.areaSize * 0.9
-    );
-
-    // Movement path (simple waypoints)
-    agv.userData = {
-        id: id,
-        type: 'AGV',
-        waypoints: [],
-        currentWaypointIndex: 0,
-        speed: simParams.ueSpeed * (0.8 + Math.random() * 0.4), // Slight speed variation
-        connectedBS: null, // Which BS it's primarily connected to
-        connectionLine: null // THREE.Line object
-    };
-    // Generate a simple rectangular path
-    const pathSize = simParams.areaSize * (0.4 + Math.random() * 0.5);
-    const pathOffset = new THREE.Vector3(
-            (Math.random() - 0.5) * simParams.areaSize * 0.2,
-            0.5,
-            (Math.random() - 0.5) * simParams.areaSize * 0.2
-    );
-    agv.userData.waypoints = [
-        new THREE.Vector3(-pathSize/2, 0.5, -pathSize/2).add(pathOffset),
-        new THREE.Vector3( pathSize/2, 0.5, -pathSize/2).add(pathOffset),
-        new THREE.Vector3( pathSize/2, 0.5,  pathSize/2).add(pathOffset),
-        new THREE.Vector3(-pathSize/2, 0.5,  pathSize/2).add(pathOffset),
-    ];
-        agv.position.copy(agv.userData.waypoints[0]); // Start at first waypoint
-
-
-    agvs.push(agv);
-    scene.add(agv);
-    return agv;
-}
-
-function createBeam(bs, agv) {
-    const beamMaterial = new THREE.MeshBasicMaterial({
-        color: 0x00aaff, // Light blue
-        transparent: true,
-        opacity: 0.5,
-        depthWrite: false // Render beams potentially through objects
-    });
-        // Cone points from tip to base, so start needs adjustment
-    const beamGeometry = new THREE.ConeGeometry(0.5, 1, 16, 1, true); // Radius, Height, Segments, OpenEnded
-    beamGeometry.translate(0, -0.5, 0); // Move origin to the tip
-    beamGeometry.rotateX(Math.PI / 2); // Point along Z initially
-
-    const beam = new THREE.Mesh(beamGeometry, beamMaterial);
-    beam.userData = { bsId: bs.userData.id, agvId: agv.userData.id };
-    beams.push(beam);
-    scene.add(beam);
-    return beam;
-}
-
-// --- Simulation Logic ---
-function updateUEMovement(agv, delta) {
-    if (!agv.userData.waypoints || agv.userData.waypoints.length === 0) return;
-
-    const targetWaypoint = agv.userData.waypoints[agv.userData.currentWaypointIndex];
-    const direction = targetWaypoint.clone().sub(agv.position);
-    const distanceToWaypoint = direction.length();
-
-    if (distanceToWaypoint < 0.5) { // Close enough to target
-        agv.userData.currentWaypointIndex = (agv.userData.currentWaypointIndex + 1) % agv.userData.waypoints.length;
-    } else {
-        direction.normalize();
-        agv.position.add(direction.multiplyScalar(agv.userData.speed * delta));
-        // Simple look towards movement direction
-        const lookAtPos = agv.position.clone().add(direction); // Point slightly ahead
-        agv.lookAt(lookAtPos.x, agv.position.y, lookAtPos.z); // Keep AGV level
-    }
-}
-
-function findClosestBS(agv) {
-    let closestBS = null;
-    let minDistanceSq = Infinity;
-
-    gNodeBs.forEach(bs => {
-        const distSq = agv.position.distanceToSquared(bs.position);
-        if (distSq < minDistanceSq) {
-            minDistanceSq = distSq;
-            closestBS = bs;
-        }
-    });
-    return closestBS;
-}
-
-function updateBeamforming() {
-    const beamSteeringData = {}; // For JSON output
-
-    // Assign AGVs to closest BS (simple association)
-    agvs.forEach(agv => {
-        agv.userData.connectedBS = findClosestBS(agv);
+        this.params = { 
+            obstacleDensity: 30,
+            selectedBsId: null, 
+            selectedUeId: null, 
+            factorySize: 250, 
+            wallHeight: 10,
+            ueDensity: 10, 
+            bsDensity: 4 
+        };
         
-        // Remove old connection line if exists
-        if (agv.userData.connectionLine) {
-            scene.remove(agv.userData.connectionLine);
-            agv.userData.connectionLine.geometry.dispose();
-            agv.userData.connectionLine.material.dispose();
-            agv.userData.connectionLine = null;
-        }
+        this.raycaster = new THREE.Raycaster();
+        this.clock = new THREE.Clock();
+        this.scene = new THREE.Scene();
+        this.isPaused = true;
+        
+        this.chargingStations = [];
+        this.connectionLines = []; 
+        this.workstations = []; 
+        this.obstacles = []; 
+        this.gNodeBs = []; 
+        this.agvs = []; 
 
-        // Create new connection line (simple ray)
-        if (agv.userData.connectedBS) {
-            const points = [agv.position.clone(), agv.userData.connectedBS.position.clone()];
-            const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
-            const lineMat = new THREE.LineBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.3 }); // Green line
-            agv.userData.connectionLine = new THREE.Line(lineGeo, lineMat);
-            scene.add(agv.userData.connectionLine);
-        }
-    });
+        this.renderer = null; 
+        this.controls = null;
+        this.camera = null; 
 
-
-    // Clear existing beams
-    beams.forEach(beam => scene.remove(beam));
-    beams.forEach(beam => { beam.geometry.dispose(); beam.material.dispose(); }); // Cleanup
-    beams = [];
-
-    // Create and steer new beams for each BS-AGV connection
-    gNodeBs.forEach(bs => {
-        beamSteeringData[bs.userData.id] = { steering_angles: [] }; // Init for JSON
-
-        agvs.forEach(agv => {
-            if (agv.userData.connectedBS === bs) {
-            const beam = createBeam(bs, agv);
-
-                const bsPos = bs.position;
-                const agvPos = agv.position;
-                const direction = agvPos.clone().sub(bsPos);
-                const distance = direction.length();
-
-                beam.scale.z = distance; // Set length
-                beam.position.copy(bsPos); // Start at BS
-                beam.lookAt(agvPos); // Point towards AGV
-
-                // Calculate Azimuth/Elevation (simplified)
-                const dirNorm = direction.normalize();
-                const azimuth = Math.atan2(dirNorm.x, dirNorm.z); // Angle in XZ plane
-                const elevation = Math.asin(dirNorm.y); // Angle from XZ plane
-
-                // Store for JSON output (convert radians to degrees)
-                beamSteeringData[bs.userData.id].steering_angles.push({
-                    agv_id: agv.userData.id,
-                    azimuth_deg: THREE.MathUtils.radToDeg(azimuth).toFixed(1),
-                    elevation_deg: THREE.MathUtils.radToDeg(elevation).toFixed(1)
-                });
-
-                // Adjust beam color/opacity based on distance (simple signal strength proxy)
-                const maxDist = simParams.areaSize * 0.5;
-                const strengthFactor = Math.max(0.1, 1.0 - distance / maxDist);
-                beam.material.opacity = 0.2 + 0.5 * strengthFactor; // Base opacity + strength
-                beam.material.color.setHSL(0.55, 0.9, 0.5 + 0.2 * strengthFactor); // Shift blue towards cyan/white for stronger
-
-                // Conceptual beam width adjustment (Subtle effect)
-                // Narrower beam for more 'elements' conceptually
-                const baseRadius = 0.8;
-                const elementsFactor = Math.max(0.2, 1.0 - (bs.userData.elements - 1) / 32); // Narrower for more elements
-                beam.scale.x = beam.scale.y = baseRadius * elementsFactor;
-            }
-        });
-    });
-
-    // Update Steering Prediction JSON display periodically
-    const now = clock.getElapsedTime();
-    if (now - lastLLMUpdateTime > simParams.llmQueryInterval / 1000) {
-        updatePredictions(beamSteeringData);
-        log("Mock steering prediction computed.");
-        lastLLMUpdateTime = now;
+        this._initialize();
     }
-}
-
-function updatePredictions(data) {
-    const formattedData = { beamforming_solutions: [] };
-    Object.keys(data).forEach(bsId => {
-        formattedData.beamforming_solutions.push({
-            bs_id: bsId,
-            // Format angles more like the example image
-            steering_angles: data[bsId].steering_angles.map(a => 
-                `${a.azimuth_deg}, ${a.elevation_deg} (AGV: ${a.agv_id})`)
-        });
-    });
-    steeringJsonContainer.textContent = JSON.stringify(formattedData, null, 2);
-}
-
-function updateStatsOverlay() {    
-    // Placeholder stats 
-    const totalAGVs = agvs.length;
-    const connectedAGVs = agvs.filter(a => a.userData.connectedBS).length;
-    const coverage = totalAGVs > 0 ? (connectedAGVs / totalAGVs * 100).toFixed(1) : 0;
-    const avgBandwidth = connectedAGVs * (Math.random() * 5 + 10); 
-    statsOverlay.innerHTML = `UE Coverage: ${coverage}% (${connectedAGVs}/${totalAGVs})<br>Avr. Bandwidth: ${avgBandwidth.toFixed(1)} Mbps`;
-}
-
-function handleParamChange(event) {
-    const id = event.target.id;
-    const value = event.target.type === 'range' ? parseFloat(event.target.value) : event.target.value;
-
-    // Parameters requiring simulation reset
-    const resetParams = ['ueDensity', 'bsDensity', 'areaSize', 'obstacleDensity'];
-    if (resetParams.includes(id)) {
-        simParams[id] = value;
-        clearScene();
-        resetSimulation();
-        log(`Parameter ${id} changed to ${value}. Resetting simulation.`);
-        return;
-    }
-
-    // Parameters affecting selected BS
-    const bsParams = ['bsHeight', 'bsAntennas', 'bsBandwidth'];
-
-    if (bsParams.includes(id) && simParams.selectedBsId) {
-        const selectedBS = gNodeBs.find(bs => 
-            bs.userData.id === simParams.selectedBsId);
-
-        // If a BS is selected
-        if (selectedBS) {
-            selectedBS.userData[id] = value;
-
-            if (id === 'bsHeight') {
-                selectedBS.position.y = value;
-                log(`Updated ${simParams.selectedBsId} height to ${value}`);
-            } else if (id === 'bsAntennas') {
-                log(`Updated ${simParams.selectedBsId} antennas to ${value} (visual update not implemented!)`, 'WARN');
-            } else {
-                log(`Updated ${simParams.selectedBsId} ${id} to ${value}`);
-            }
-        }
-    } else if (bsParams.includes(id)) {
-        simParams[id] = value;
-    }
-}
-
-function updateBSConfigPanel(bsId) {
-    const bs = gNodeBs.find(b => b.userData.id === bsId);
-    if (bs) {
-        document.getElementById('bsHeight').value = bs.userData.height;
-        document.getElementById('bsHeightValue').textContent = bs.userData.height;
-        document.getElementById('bsAntennas').value = bs.userData.antennas;
-        document.getElementById('bsAntennasValue').textContent = bs.userData.antennas;
-        document.getElementById('bsBandwidth').value = bs.userData.bandwidth;
-        document.getElementById('bsBandwidthValue').textContent = bs.userData.bandwidth;
-        document.getElementById('bs-configs').classList.remove('hidden');
-    } else {
-        document.getElementById('bs-configs').classList.add('hidden');       
-    }
-}
-
-function highlightSelectedBS(bsId) {
-    gNodeBs.forEach(bs => {
-        const coverageSphere = bs.getObjectByName("coverageSphere");
-        if (coverageSphere) {
-            if (bs.userData.id === bsId) {
-                coverageSphere.material.opacity = 0.15; // Make slightly more visible
-                coverageSphere.material.color.setHex(0xffff00); // Yellow highlight
-            } else {
-                coverageSphere.material.opacity = 0.05; // Default transparency
-                coverageSphere.material.color.setHex(0x0077ff); // Default blue
-            }
-        }
-    });
-}
-
-function onWindowResize() {
-    const newWidth = viewportContainer.clientWidth;
-    const newHeight = viewportContainer.clientHeight;
-
-    if (newWidth > 0 && newHeight > 0) { // Check dimensions are valid
-        camera.aspect = newWidth / newHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(newWidth, newHeight);
-    }
-}
-
-function setupListeners() {
-    // Simulation Controls
-    resetButton.addEventListener('click', resetSimulation);
-    pauseButton.addEventListener('click', togglePause);
-    restartButton.addEventListener('click', () => {
-        log("Restarting simulation...");
-        clearScene();
-        resetSimulation();
-    });
-
-    // Base Station Configs
-    bsSelect.addEventListener('change', (e) => {
-        simParams.selectedBsId = e.target.value;
-        updateBSConfigPanel(simParams.selectedBsId);
-        highlightSelectedBS(simParams.selectedBsId);
-        log(`Selected gNodeB: ${simParams.selectedBsId}`);
-    });
-
-        // Sliders with live value update
-    document.querySelectorAll('input[type="range"]').forEach(slider => {
-            const valueSpan = document.getElementById(`${slider.id}Value`);
-            if (valueSpan) {
-                valueSpan.textContent = slider.value; // Initial value
-                slider.addEventListener('input', (e) => {
-                    valueSpan.textContent = e.target.value;
-                    // Update corresponding simParam immediately for some sliders
-                    if(slider.id === 'ueSpeed') simParams.ueSpeed = parseFloat(e.target.value);
-                    if(slider.id === 'llmQueryInterval') simParams.llmQueryInterval = parseInt(e.target.value);
-                });
-            }
-            // Add change listener for BS specific or reset-requiring params
-            slider.addEventListener('change', handleParamChange);
-    });
-}
-
-function togglePause() {
-    isPaused = !isPaused;
-    pauseButton.innerHTML = isPaused ? `<i class="fas fa-play"></i> Start` : `<i class="fas fa-pause"></i> Pause`;
-    pauseButton.classList.toggle('bg-blue-600', isPaused);
-    pauseButton.classList.toggle('bg-yellow-600', !isPaused);
-    pauseButton.classList.toggle('hover:bg-blue-700', isPaused);
-    pauseButton.classList.toggle('hover:bg-yellow-700', !isPaused);
-    log(isPaused ? "Simulation paused!" : "Simulation running...", "WARN");
-}
-
-function clearScene() {
-    log("Clearing scene objects...");
-
-    // Remove AGVs and their lines
-    agvs.forEach(agv => {
-        if (agv.userData.connectionLine) scene.remove(agv.userData.connectionLine);
-        scene.remove(agv);
-    });
-    agvs = [];
-
-    // Remove Beams
-    beams.forEach(beam => scene.remove(beam));
-    beams = [];
-
-    // Remove Base Stations
-    gNodeBs.forEach(bs => scene.remove(bs));
-    gNodeBs = [];
-
-    // Remove Obstacles
-    obstacles.forEach(obs => scene.remove(obs));
-    obstacles = [];
-
-    // Remove Floor
-    if(factoryFloor) scene.remove(factoryFloor);
-    factoryFloor = null;
-
-    // Clear UI elements linked to objects
-    bsSelect.innerHTML = '<option value="">Select BS</option>';
-    steeringJsonContainer.textContent = '{\n  "beamforming_solutions": []\n}';
-}
-
-function resetSimulation() {
-    isPaused = true; 
-    log("Resetting simulation...");
-    pauseButton.innerHTML = `<i class="fas fa-play"></i> Start`;
-    pauseButton.classList.add('bg-yellow-600', 'hover:bg-yellow-700');
-    pauseButton.classList.remove('bg-blue-600', 'hover:bg-blue-700');
-
-    // Read current values from sliders that trigger reset
-    simParams.areaSize = parseFloat(document.getElementById('areaSize').value);
-    simParams.bsDensity = parseInt(document.getElementById('bsDensity').value);
-    simParams.ueDensity = parseInt(document.getElementById('ueDensity').value);
-    simParams.obstacleDensity = parseInt(document.getElementById('obstacleDensity').value);
-
-    clearScene(); // Remove existing objects
-    createEnvironment();
-
-    // Create Base Stations
-    bsSelect.innerHTML = '<option value="">Select</option>'; // Clear dropdown
-    for (let i = 0; i < simParams.bsDensity; i++) {
-        const angle = (i / simParams.bsDensity) * Math.PI * 2;
-        const radius = simParams.areaSize * 0.35;
-        const position = new THREE.Vector3(
-            Math.cos(angle) * radius,
-            simParams.bsHeight, // Use current height setting
-            Math.sin(angle) * radius
-        );
-        createBS(`gNodeB${i + 1}`, position);
-    }
-
-    // Select the first BS by default if available
-    if (gNodeBs.length > 0) {
-        simParams.selectedBsId = gNodeBs[0].userData.id;
-        bsSelect.value = simParams.selectedBsId;
-        updateBSConfigPanel(simParams.selectedBsId);
-        highlightSelectedBS(simParams.selectedBsId);
-    } else {
-        simParams.selectedBsId = null;
-        updateBSConfigPanel(null);
-    }
-
-    // Create AGVs
-    for (let i = 0; i < simParams.ueDensity; i++) {
-        createUE(`AGV${i + 1}`);
-    }
-
-    // Reset camera slightly
-    camera.position.set(simParams.areaSize * 0.7, simParams.areaSize * 0.6, simParams.areaSize * 0.7);
-    controls.target.set(0, simParams.bsHeight / 4, 0); // Look towards center slightly raised
-    controls.update();
-    lastLLMUpdateTime = 0; // Reset mock LLM timer
-    log(`Created ${simParams.bsDensity} BS and ${simParams.ueDensity} AGVs.`);
-}
-
-function animateFrame() {
-    requestAnimationFrame(animateFrame);
-    const delta = clock.getDelta();
     
-    if (isPaused === false) {
-        // Update AGV movement
-        agvs.forEach(agv => { 
-            updateUEMovement(agv, delta); 
+    _initialize() {
+        this.log('Initializing simulation...', 'DEBUG');
+        this.scene.background = new THREE.Color(0x1a202c);
+        this.scene.fog = new THREE.Fog(0x1a202c, this.params.factorySize * 1.5, this.params.factorySize * 3);
+        this.camera = new THREE.PerspectiveCamera(45, this.dom.viewport.clientWidth / this.dom.viewport.clientHeight, 0.1, 1000);
+        
+        this.renderer = new THREE.WebGLRenderer({ antialias: true });
+        this.renderer.setSize(this.dom.viewport.clientWidth, this.dom.viewport.clientHeight);
+        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        this.renderer.setPixelRatio(window.devicePixelRatio);
+        this.renderer.shadowMap.enabled = true; 
+        this.dom.viewport.appendChild(this.renderer.domElement);
+
+        this.scene.add(new THREE.HemisphereLight(0x606070, 0x202020, 2.0));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 2.0);
+        dirLight.position.set(this.params.factorySize * 0.5, this.params.factorySize * 0.8, this.params.factorySize * 0.3);
+        dirLight.shadow.camera.bottom = -this.params.factorySize / 2;
+        dirLight.shadow.camera.right = this.params.factorySize / 2;
+        dirLight.shadow.camera.left = -this.params.factorySize / 2;
+        dirLight.shadow.camera.top = this.params.factorySize / 2;
+        dirLight.shadow.mapSize.height = 2048;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.castShadow = true;
+        this.scene.add(dirLight);
+
+        this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+        this.controls.maxPolarAngle = Math.PI / 2 - 0.05; 
+        this.controls.dampingFactor = 0.05;
+        this.controls.enableDamping = true; 
+        this.controls.autoRotate  = false; 
+        this.controls.minDistance = 20; 
+        this.controls.maxDistance = 
+        this.params.factorySize * 2;
+
+        this._setupEventListeners();
+        this.resetSimulation();
+        this._animate();
+        this.log('Initialization complete.', 'SUCCESS');
+    }
+    
+    _setupEventListeners() {
+        this.dom.restartButton.addEventListener('click', () => this.resetSimulation());
+        this.dom.pauseButton.addEventListener('click', () => this.togglePause());
+        window.addEventListener('resize', () => this._onWindowResize(), false);
+        
+        this.dom.rotateSpeed.addEventListener('change', () => { 
+            this.controls.autoRotateSpeed = this.dom.rotateSpeed.value;
+            this.controls.autoRotate = this.dom.rotateSpeed.value > 0 ? true : false;
+            document.getElementById('rotateSpeedValue').textContent = this.dom.rotateSpeed.value;
         });
 
-        // Update beamforming 
-        updateBeamforming();
+        this.dom.factoryArea.addEventListener('change', () => { 
+            this.params.factorySize = this.dom.factoryArea.value;
+            document.getElementById('factoryAreaValue').textContent = this.dom.factoryArea.value;
+            this.log(`Factory size set to ${this.params.factorySize}! Please reset the simulation.`, 'WARN');            
+        });
 
-        // Update stats overlay
-        updateStatsOverlay();
+        this.dom.bsDensity.addEventListener('change', () => { 
+            this.params.bsDensity = this.dom.bsDensity.value;
+            document.getElementById('bsDensityValue').textContent = this.dom.bsDensity.value;
+            this.log(`BS density set to ${this.params.bsDensity}! Please reset the simulation.`, 'WARN');
+        });
+
+        this.dom.ueDensity.addEventListener('change', () => { 
+            this.params.ueDensity = this.dom.ueDensity.value;
+            document.getElementById('ueDensityValue').textContent = this.dom.ueDensity.value;
+            this.log(`UE density set to ${this.params.ueDensity}! Please reset the simulation.`, 'WARN');
+        });
+
+        this.dom.bsSelect.addEventListener('change', e => { 
+            this.params.selectedBsId = e.target.value; 
+            this._highlightSelectedBS(this.params.selectedBsId); 
+        });
+        
+        this.dom.ueSelect.addEventListener('change', e => { 
+            this.params.selectedUeId = e.target.value; 
+            this._highlightSelectedUE(this.params.selectedUeId); 
+        });
     }
 
-    // if controls.enableDamping/controls.autoRotate = true
-    controls.update(); 
-    renderer.render(scene, camera);
+    log(message, type = 'EVENT') {
+        const colors = {
+            'WARN': '#ffe100ff', 
+            'ERROR': '#f87171', 
+            'EVENT': '#9ca3af', 
+            'SUCCESS': '#34d399', 
+            'HANDOVER': '#4299e1' 
+        };
+        const entry = document.createElement('div');
+        const time = new Date().toLocaleTimeString();
+        entry.style.color = colors[type] || colors['EVENT'];
+        entry.innerHTML = `[${time}] ${message}`;
+        this.dom.logs.appendChild(entry); this.dom.logs.scrollTop = this.dom.logs.scrollHeight;
+        if (this.dom.logs.childNodes.length > 200) this.dom.logs.removeChild(this.dom.logs.firstChild);
+    }
+
+    resetSimulation() {
+        this.isPaused = true;
+        this.log('Resetting simulation...', 'WARN');
+        this.dom.pauseButton.innerHTML = `<i class="fa-solid fa-play"></i> Start`;
+
+        this._clearSceneObjects();
+        this._createEnvironment();
+        
+        const half = this.params.factorySize / 2;
+        const quarter = this.params.factorySize / 4;
+
+        const positions = [
+            [-quarter, 0, -quarter], // Top-left
+            [ quarter, 0, -quarter], // Top-right
+            [-quarter, 0,  quarter], // Bottom-left
+            [ quarter, 0,  quarter]  // Bottom-right
+        ];
+
+        for (let i = 0; i < Math.min(this.params.bsDensity, 4); i++) {
+            const [x, y, z] = positions[i];
+            this._createBS(`gNodeB-${i + 1}`, x, y, z);
+        }
+
+        for (let i = 0; i < this.params.ueDensity; i++) 
+            this._createUE(`AGV-${1001 + i}`);
+
+        if (this.gNodeBs.length > 0) { 
+            this.dom.bsSelect.value = this.gNodeBs[0].userData.id; 
+            this.params.selectedBsId = this.gNodeBs[0].userData.id; 
+        }
+
+        if (this.agvs.length > 0) { 
+            this.dom.ueSelect.value = this.agvs[0].userData.id; 
+            this.params.selectedUeId = this.agvs[0].userData.id; 
+        }
+
+        this.camera.position.set(this.params.factorySize * 0.7, 
+            this.params.factorySize * 0.6, this.params.factorySize * 0.7);
+        this.controls.target.set(0, 10, 0); this.controls.update();
+        
+        this._highlightSelectedBS(this.params.selectedBsId);
+        this._highlightSelectedUE(this.params.selectedUeId);
+
+        this.log(`Created ${this.params.bsDensity} gNodeBs and ${this.params.ueDensity} AGVs.`, 'SUCCESS');
+    }
+    
+    togglePause() { 
+        this.isPaused = !this.isPaused; 
+        this.dom.pauseButton.innerHTML = this.isPaused ? 
+        `<i class="fa-solid fa-play"></i> Start` : 
+        `<i class="fa-solid fa-pause"></i> Pause`; 
+        this.dom.pauseButton.classList.toggle('bg-blue-600', this.isPaused);
+        this.dom.pauseButton.classList.toggle('bg-yellow-600', !this.isPaused);
+        this.dom.pauseButton.classList.toggle('hover:bg-blue-700', this.isPaused);
+        this.dom.pauseButton.classList.toggle('hover:bg-yellow-700', !this.isPaused);        
+        this.log(this.isPaused ? "Simulation paused." : "Simulation running...", "WARN"); 
+    }
+    
+    _createFloorTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512; canvas.height = 512;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#404040'; ctx.fillRect(0, 0, 512, 512);
+        for (let i = 0; i < 5000; i++) {
+            ctx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.1})`;
+            ctx.beginPath();
+            ctx.arc(Math.random() * 512, Math.random() * 512, Math.random() * 10, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.wrapS = THREE.RepeatWrapping; texture.wrapT = THREE.RepeatWrapping;
+        texture.repeat.set(this.params.factorySize / 20, this.params.factorySize / 20);
+        return texture;
+    }
+
+    _createEnvironment() {
+        this.obstacles = [];
+        this.workstations = [];
+        this.chargingStations = [];
+
+        const boundingBoxes = [];
+        const size = this.params.factorySize;
+        const wallHeight = this.params.wallHeight;
+
+        const floorMat = new THREE.MeshStandardMaterial({ 
+            map: this._createFloorTexture(), roughness: 0.6, metalness: 0.1 
+        });
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(size, size), floorMat);
+        floor.rotation.x = -Math.PI / 2; 
+        this.scene.add(floor);
+
+        const grid = new THREE.GridHelper(size, 20, 0x8899aa, 0x8899aa);
+        grid.position.y = 0.01;
+        this.scene.add(grid);
+
+        // Add walls
+        const addWall = (geometry, position, rotationY = 0) => {
+            const wall = new THREE.Mesh(geometry, floorMat);
+            wall.position.copy(position);
+            wall.rotation.y = rotationY;
+            wall.castShadow = true;
+            this.scene.add(wall);
+        };
+
+        addWall(new THREE.BoxGeometry(size, wallHeight, 1), new THREE.Vector3(0, wallHeight/2, -size/2));
+        addWall(new THREE.BoxGeometry(size, wallHeight, 1), new THREE.Vector3(0, wallHeight/2, size/2));
+        addWall(new THREE.BoxGeometry(1, wallHeight, size), new THREE.Vector3(size/2, wallHeight/2, 0));
+        addWall(new THREE.BoxGeometry(1, wallHeight, size), new THREE.Vector3(-size/2, wallHeight/2, 0));
+        addWall(new THREE.BoxGeometry(1, wallHeight, size * 3/4), new THREE.Vector3(-size/6, wallHeight/2, size/8));
+        addWall(new THREE.BoxGeometry(1, wallHeight, size/2), new THREE.Vector3(size/4, wallHeight/2, 0), Math.PI/2);
+
+        // Collision detection helper
+        const isOverlapping = (bbox) => {
+            return boundingBoxes.some(existing => bbox.intersectsBox(existing));
+        };
+
+        // Helper to add object with collision check
+        const addObject = (mesh) => {
+            mesh.updateMatrixWorld();
+            const bbox = new THREE.Box3().setFromObject(mesh);
+            if (!isOverlapping(bbox)) {
+                boundingBoxes.push(bbox);
+                this.scene.add(mesh);
+                return true;
+            }
+            return false;
+        };
+
+        // Add workstations
+        const wsColors = [0xffff00, 0x4299e1, 0x718096, 0x9f7aea, 0x48bb78];
+        for(let i = 0; i < 6; i++) {
+            const ws = new THREE.Mesh(
+                new THREE.BoxGeometry(12, 0.5 , 12), 
+                new THREE.MeshStandardMaterial({ color: wsColors[i % wsColors.length] })
+            );
+            ws.position.set(size * 0.4, 0.25, -size * 0.35 + i * size * 0.14);
+            if (addObject(ws)) this.workstations.push(ws);
+        }
+
+        // Add charging station
+        const charger = new THREE.Mesh(
+            new THREE.CircleGeometry(10, 32),
+            new THREE.MeshStandardMaterial({ color: 0xffff00 })
+        );
+        charger.position.set(-size * 0.4, 0.5, size * 0.4);
+        charger.rotation.x = -Math.PI / 2;
+        if (addObject(charger)) this.chargingStations.push(charger);
+
+        // Add random obstacles with retry loop
+        for(let i = 0; i < this.params.obstacleDensity; i++) {
+            let placed = false;
+            for (let attempt = 0; attempt < 20 && !placed; attempt++) {
+                const shapeX = Math.random() + 0.1;
+                const shapeY = Math.random() + 0.1;
+                const shapeZ = Math.random() + 0.1;
+
+                const obs = new THREE.Mesh(
+                    new THREE.BoxGeometry(shapeX * 20, shapeY * this.params.wallHeight - 1, 20 * shapeZ), 
+                    new THREE.MeshStandardMaterial({ color: 0x718096 })
+                );
+
+                obs.position.set(
+                    UTILS.clamp((Math.random() - 0.5) * size, -size/2 + 5, size/2 - 5),
+                    shapeY * 7.5,
+                    UTILS.clamp((Math.random() - 0.5) * size, -size/2 + 5, size/2 - 5)
+                );
+
+                if (addObject(obs)) {
+                    this.obstacles.push(obs);
+                    placed = true;
+                }
+            }
+        }
+    }
+
+    _createBS(id, x, y, z) {
+        // Position randomly in the factory space
+        //const x = (Math.random() - 0.5) * this.params.factorySize * 0.7;
+        //const z = (Math.random() - 0.5) * this.params.factorySize * 0.7;
+        const bsGroup = new THREE.Group();       
+        bsGroup.position.set(x, y, z);
+
+        // Mast (pole)
+        const mastHeight = 18;
+        const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.4, mastHeight, 16),
+            new THREE.MeshStandardMaterial({ color: 0x90a0b0, metalness: 0.7, roughness: 0.4 }));
+        mast.position.y = mastHeight / 2;
+        mast.castShadow = true;
+        bsGroup.add(mast);
+
+        // Antenna panels (3-sided)
+        const panelGeometry = new THREE.BoxGeometry(0.4, 2.5, 1.2);
+        const panelMaterial = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, metalness: 0.7 });
+        
+        const radius = 0.8;
+        for (let i = 0; i < 3; i++) {
+            const panel = new THREE.Mesh(panelGeometry, panelMaterial);
+            const angle = (i / 3) * Math.PI * 2;
+            panel.position.set(Math.cos(angle) * radius, 
+            mastHeight - 2, Math.sin(angle) * radius);
+            panel.rotation.y = angle + Math.PI;            
+            bsGroup.add(panel);
+        }
+
+        // Optional horizontal crossbar 
+        const crossbar = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.6, 8),
+            new THREE.MeshStandardMaterial({ color: 0x718096 })
+        );
+        crossbar.position.y = mastHeight - 2;
+        crossbar.rotation.z = Math.PI / 2;
+        bsGroup.add(crossbar);
+
+        // Status light on top
+        const light = new THREE.PointLight(0x00ff00, 10, 25); // green for active
+        light.position.y = mastHeight + 1;
+        light.name = 'status_light';
+        bsGroup.add(light);
+
+        // light mesh
+        const lightSphere = new THREE.Mesh(new THREE.SphereGeometry(0.5, 15, 15),
+            new THREE.MeshStandardMaterial({ emissive: 0x00ff00, emissiveIntensity: 10 }));
+        lightSphere.position.copy(light.position);
+        bsGroup.add(lightSphere);
+
+        // set user data
+        bsGroup.userData = { 
+            id, 
+            status: 'active', 
+            connected_ues: [], 
+            height: mastHeight,
+            vendor: UTILS.getRandom(CONFIGS.vendors), 
+            band: UTILS.getRandom(CONFIGS.bands).name,
+        };
+        this.gNodeBs.push(bsGroup); 
+        this.scene.add(bsGroup); 
+
+        // add bs option
+        this.dom.bsSelect.add(new Option(id, id));
+    }
+
+    _createUE(id) {
+        const agvGroup = new THREE.Group();
+        const movement_speed = 3 + Math.random() * 2; // 3-5 m/s
+        agvGroup.userData = {
+            id, imei: UTILS.generateImei(), status: 'idle', task: 'None', battery_percentage: 100, movement_speed,
+            connected_bs_id: null, rsrp_dbm: -140, sinr_db: -20, throughput_mbps: 0,
+            targetPosition: null,
+        };
+        
+        const bodyMat = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.5, roughness: 0.4 });
+        const wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.8 });
+        const body = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.8, 2.0), bodyMat);
+        body.castShadow = true; 
+        agvGroup.add(body);
+
+        const wheelGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.5, 16);
+        wheelGeo.rotateZ(Math.PI / 2);
+        [ [1, -0.2, 1], [-1, -0.2, 1], [1, -0.2, -1], [-1, -0.2, -1] ].forEach(p => { 
+            const wheel = new THREE.Mesh(wheelGeo, wheelMat); 
+            wheel.position.fromArray(p); 
+            agvGroup.add(wheel); 
+        });
+        const sensor = new THREE.Mesh(new THREE.SphereGeometry(0.3, 10, 10), 
+            new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x00ffff, emissiveIntensity: 2 }));            
+        sensor.name = "ue_sensor"; sensor.position.y = 0.8; agvGroup.add(sensor);
+        
+        const bound = this.params.factorySize / 2 - 2;
+        agvGroup.position.set(UTILS.clamp((Math.random()-0.5) * this.params.factorySize, -bound, bound), 
+        0.5, UTILS.clamp((Math.random()-0.5) * this.params.factorySize, -bound, bound));
+
+        this._assignNewTask(agvGroup);
+        this.agvs.push(agvGroup); 
+        this.scene.add(agvGroup); 
+
+        // add ue option
+        this.dom.ueSelect.add(new Option(id, id));
+    }
+
+    _assignNewTask(agv) {
+        const bound = this.params.factorySize / 2 - 2;
+        if (agv.userData.battery_percentage < 20) {
+            agv.userData.task = 'Charging';
+            agv.userData.targetPosition = this.chargingStations[0].position.clone();
+            this.log(`${agv.userData.id} battery low. Moving to charging station.`, 'WARN');
+        } else {
+            agv.userData.task = UTILS.getRandom(CONFIGS.agvTasks);
+            agv.userData.targetPosition = UTILS.getRandom(this.workstations).position.clone();
+        }
+        agv.userData.targetPosition.x = UTILS.clamp(agv.userData.targetPosition.x, -bound, bound);
+        agv.userData.targetPosition.z = UTILS.clamp(agv.userData.targetPosition.z, -bound, bound);
+        agv.userData.status = 'Moving';
+    }
+
+    _updateAGVState(agv, delta) {
+        if(!this.isPaused) agv.userData.battery_percentage -= delta * 0.1;
+        if (agv.userData.targetPosition) {
+            const direction = agv.userData.targetPosition.clone().sub(agv.position);
+            direction.y = 0;
+            if (direction.length() < 1.0) {
+                agv.userData.status = 'Idle';
+                if (agv.userData.task === 'Charging') {
+                        if(agv.userData.battery_percentage < 100) agv.userData.battery_percentage += delta * 10;
+                        else { this.log(`${agv.userData.id} charged.`, 'SUCCESS'); this._assignNewTask(agv); }
+                } else { setTimeout(() => this._assignNewTask(agv), 1000 + Math.random()*2000); } // Wait for 1-3 seconds
+                agv.userData.targetPosition = null; // Stop moving
+            } else {
+                agv.userData.status = 'Moving';
+                direction.normalize();
+                agv.position.add(direction.multiplyScalar(agv.userData.movement_speed * delta));
+                agv.lookAt(agv.position.clone().add(direction));
+            }
+        }
+    }
+
+    _updateConnectivityAndHandover() {
+        this.connectionLines.forEach(l => { this.scene.remove(l); l.geometry.dispose(); l.material.dispose(); });
+        this.connectionLines = [];
+        this.gNodeBs.forEach(bs => bs.userData.connected_ues = []);
+
+        for (const agv of this.agvs) {
+            const signals = this.gNodeBs.map(bs => {
+                const distance = agv.position.distanceTo(bs.position);
+                let pathLoss = CONFIGS.pathLoss.referenceLoss + 10 * CONFIGS.pathLoss.exponent * Math.log10(distance);
+                this.raycaster.set(agv.position, bs.position.clone().sub(agv.position).normalize());
+                const intersects = this.raycaster.intersectObjects(this.obstacles, false);
+                if(intersects.length > 0 && intersects[0].distance < distance) pathLoss += CONFIGS.pathLoss.obstacleShadowLoss;
+                return { bs, rsrp_dbm: CONFIGS.bsTxPowerDBM - pathLoss };
+            });
+            if (signals.length === 0) continue;
+            
+            signals.sort((a, b) => b.rsrp_dbm - a.rsrp_dbm);
+            const bestSignal = signals[0];
+
+            const currentBS = this.gNodeBs.find(bs => bs.userData.id === agv.userData.connected_bs_id);
+            const currentRSRP = currentBS ? signals.find(s=> s.bs.userData.id === currentBS.userData.id).rsrp_dbm : -Infinity;
+            if (!currentBS || bestSignal.rsrp_dbm > currentRSRP + CONFIGS.handoverMarginDB) {
+                this.log(`HANDOVER: ${agv.userData.id} to ${bestSignal.bs.userData.id} (RSRP: ${bestSignal.rsrp_dbm.toFixed(1)}dBm)`, 'HANDOVER');
+                agv.userData.connected_bs_id = bestSignal.bs.userData.id;
+            }
+            
+            const servingBS = this.gNodeBs.find(b => b.userData.id === agv.userData.connected_bs_id);
+            if(!servingBS) { agv.userData.rsrp_dbm = -140; agv.userData.sinr_db = -20; agv.userData.throughput_mbps = 0; continue; }
+            
+            const servingRSRP_dbm = signals.find(s => s.bs.userData.id === servingBS.userData.id).rsrp_dbm;
+            const servingRSRPWatts = UTILS.dbmToWatts(servingRSRP_dbm);
+            let interferenceWatts = 0;
+            signals.filter(s => s.bs.userData.id !== servingBS.userData.id).forEach(s => { interferenceWatts += UTILS.dbmToWatts(s.rsrp_dbm); });
+            const noiseWatts = UTILS.dbmToWatts(CONFIGS.thermalNoiseDBM + 10 * Math.log10(20e6));
+            
+            agv.userData.rsrp_dbm = servingRSRP_dbm;
+            agv.userData.sinr_db = 10 * Math.log10(servingRSRPWatts / (interferenceWatts + noiseWatts));
+            agv.userData.throughput_mbps = UTILS.estimateThroughput(agv.userData.sinr_db);
+            servingBS.userData.connected_ues.push(agv.userData.id);
+
+            const lineEdge = new THREE.Vector3(); 
+            lineEdge.x = servingBS.position.x;
+            lineEdge.z = servingBS.position.z;
+            lineEdge.y = servingBS.userData.height;
+            const line = new THREE.Line( new THREE.BufferGeometry().setFromPoints([agv.position, lineEdge]), 
+            new THREE.LineBasicMaterial({ color: UTILS.getSINRColor(agv.userData.sinr_db) }));
+            this.connectionLines.push(line); this.scene.add(line);
+        }
+    }
+
+    _updateUI() {
+        const connectedAGVs = this.agvs.filter(a => a.userData.connected_bs_id);
+        let avg_rsrp = -140, avg_sinr = -20, total_throughput = 0;
+        if(connectedAGVs.length > 0) {
+            avg_rsrp = connectedAGVs.reduce((acc, ue) => acc + ue.userData.rsrp_dbm, 0) / connectedAGVs.length;
+            avg_sinr = connectedAGVs.reduce((acc, ue) => acc + ue.userData.sinr_db, 0) / connectedAGVs.length;
+            total_throughput = connectedAGVs.reduce((acc, ue) => acc + ue.userData.throughput_mbps, 0);
+        }
+        this.dom.stats.innerHTML = `<strong>Network Health</strong>
+            <div class="info-field"><strong>Connected:</strong><span>${connectedAGVs.length}/${this.agvs.length} UEs</span></div>
+            <div class="info-field"><strong>Avg. RSRP:</strong><span>${avg_rsrp.toFixed(1)} dBm</span></div>
+            <div class="info-field"><strong>Avg. SINR:</strong><span>${avg_sinr.toFixed(1)} dB</span></div>
+            <div class="info-field"><strong>Total Throughput:</strong><span>${total_throughput.toFixed(1)} Mbps</span></div>`;
+
+        const selectedBS = this.gNodeBs.find(b => b.userData.id === this.params.selectedBsId);
+        if(selectedBS) {
+            this.dom.bsConfigPanel.classList.remove('hidden');
+            const { status, vendor, band, connected_ues, id } = selectedBS.userData;
+            document.getElementById('bsStatus').textContent = status;
+            document.getElementById('bsVendor').textContent = vendor;
+            document.getElementById('bsBand').textContent = band;
+            document.getElementById('bsPosition').textContent = `X:${selectedBS.position.x.toFixed(0)} Y:${selectedBS.position.y.toFixed(0)} Z:${selectedBS.position.z.toFixed(0)}`;
+            const ueCount = connected_ues.length;
+            document.getElementById('bsConnectedUes').textContent = ueCount;
+            const load = (ueCount / 10) * 100; // Assume 10 UEs is 100% load
+            document.getElementById('bsLoad').textContent = `${load.toFixed(0)}%`;
+            selectedBS.getObjectByName('status_light').color.set(load > 75 ? 0xff4444 : load > 50 ? 0xffff00 : 0x00aaff);
+        } else { this.dom.bsConfigPanel.classList.add('hidden'); }
+
+        const selectedUE = this.agvs.find(u => u.userData.id === this.params.selectedUeId);
+        if (selectedUE) {
+            this.dom.ueConfigPanel.classList.remove('hidden');
+            const data = selectedUE.userData;
+            const pos = selectedUE.position;
+            document.getElementById('ueImei').textContent = data.imei;
+            document.getElementById('ueStatus').textContent = data.status;
+            document.getElementById('ueTask').textContent = data.task;
+            document.getElementById('ueSpeed').textContent = `${data.status === 'Moving' ? data.movement_speed.toFixed(1) : '0.0'} m/s`;
+            document.getElementById('uePosition').textContent = `X:${pos.x.toFixed(1)} Y:${pos.y.toFixed(1)} Z:${pos.z.toFixed(1)}`;
+            document.getElementById('ueBattery').textContent = `${data.battery_percentage.toFixed(0)}%`;
+            document.getElementById('ueConnectedBs').textContent = data.connected_bs_id || 'None';
+            document.getElementById('ueRSRP').textContent = `${data.rsrp_dbm.toFixed(1)} dBm`;
+            document.getElementById('ueSINR').textContent = `${data.sinr_db.toFixed(1)} dB`;
+            document.getElementById('ueThroughput').textContent = `${data.throughput_mbps.toFixed(1)} Mbps`;
+        } else { this.dom.ueConfigPanel.classList.add('hidden'); }
+    }
+    
+    _highlightSelectedBS(bsId) { 
+        this.gNodeBs.forEach(bs => { 
+            bs.getObjectByName('status_light').intensity = bs.userData.id === bsId ? 25 : 10; 
+        }); 
+    }
+
+    _highlightSelectedUE(ueId) { 
+        this.agvs.forEach(agv => { 
+            const sensor = agv.getObjectByName("ue_sensor"); 
+            if(sensor) sensor.material.emissive.setHex(agv.userData.id === ueId ? 0xff4444 : 0x00ffff); 
+        }); 
+    }
+    
+    _clearSceneObjects() {
+        this.log("Clearing scene objects...");
+        [...this.agvs, ...this.gNodeBs, ...this.obstacles, ...this.workstations, ...this.chargingStations, ...this.connectionLines].forEach(obj => this.scene.remove(obj));
+        this.agvs = []; this.gNodeBs = []; this.obstacles = []; this.workstations = []; this.chargingStations = []; this.connectionLines = [];
+        this.dom.bsSelect.innerHTML = '<option value="">None</option>'; this.dom.ueSelect.innerHTML = '<option value="">None</option>';
+    }
+
+    _animate() {
+        requestAnimationFrame(() => this._animate());
+        const delta = this.clock.getDelta();
+        if (!this.isPaused && delta > 0) {
+            this.agvs.forEach(agv => this._updateAGVState(agv, delta));
+            this._updateConnectivityAndHandover();
+        }
+        this._updateUI();
+        this.controls.update();
+        this.renderer.render(this.scene, this.camera);
+    }
+    
+    _onWindowResize() { 
+        const { clientWidth: w, clientHeight: h } = this.dom.viewport; 
+        this.camera.aspect = w / h; 
+        this.camera.updateProjectionMatrix(); 
+        this.renderer.setSize(w, h); 
+    }
 }
 
-function initialize() {
-    log("Initializing simulation...");
-
-    // Scene
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x87ceeb); 
-    scene.fog = new THREE.Fog(0x1a202c, 100, 300);
-
-    // Camera
-    const aspect = viewportContainer.clientWidth / viewportContainer.clientHeight;
-    camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 1000);
-    camera.position.set(simParams.areaSize * 0.7, simParams.areaSize * 0.6, simParams.areaSize * 0.7);
-    camera.lookAt(0, 0, 0);
-
-    // Renderer
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(viewportContainer.clientWidth, viewportContainer.clientHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.shadowMap.enabled = true; // Enable shadows
-        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    viewportContainer.appendChild(renderer.domElement);
-
-    // Lighting
-    const ambientLight = new THREE.AmbientLight(0x606060);
-    scene.add(ambientLight);
-
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    directionalLight.position.set(simParams.areaSize * 0.5, simParams.areaSize, simParams.areaSize * 0.5);
-    directionalLight.castShadow = true;
-    directionalLight.shadow.camera.near = 0.5;
-    directionalLight.shadow.mapSize.width = 1024;
-    directionalLight.shadow.mapSize.height = 1024;
-    directionalLight.shadow.camera.far = simParams.areaSize * 3;
-    directionalLight.shadow.camera.left = -simParams.areaSize;
-    directionalLight.shadow.camera.right = simParams.areaSize;
-    directionalLight.shadow.camera.top = simParams.areaSize;
-    directionalLight.shadow.camera.bottom = -simParams.areaSize;
-    scene.add(directionalLight);
-
-    // Controls
-    controls = new OrbitControls(camera, renderer.domElement);
-    controls.autoRotateSpeed = 0.25;
-    controls.dampingFactor = 0.05;
-    controls.enableDamping = true;
-    controls.autoRotate = false;
-
-    // Prevent looking below ground
-    controls.maxPolarAngle = Math.PI / 2 - 0.05; 
-    controls.target.set(0, 0, 0);
-    controls.update();
-
-    // Resize listener
-    window.addEventListener('resize', onWindowResize, false);
-
-    setupListeners();
-    resetSimulation();
-    animateFrame();
-
-    log("Initialization complete!", "SUCCESS");
-}
-
-initialize();
+window.addEventListener('DOMContentLoaded', () => { 
+    let sim = new Simulation() 
+});
