@@ -486,7 +486,7 @@ class Simulation {
         }
     }
 
-    _updateConnectivityAndHandover() {
+    _updateConnectivity() {
         this.connectionLines.forEach(l => { this.scene.remove(l); l.geometry.dispose(); l.material.dispose(); });
         this.connectionLines = [];
         this.gNodeBs.forEach(bs => bs.userData.connected_ues = []);
@@ -544,11 +544,11 @@ class Simulation {
             avg_sinr = connectedAGVs.reduce((acc, ue) => acc + ue.userData.sinr_db, 0) / connectedAGVs.length;
             total_throughput = connectedAGVs.reduce((acc, ue) => acc + ue.userData.throughput_mbps, 0);
         }
-        this.dom.stats.innerHTML = `<strong>Network Health</strong>
+        this.dom.stats.innerHTML = `<div class="mb-2"><h2><i class="fas fa-wifi"></i> Network Health</h2></div>
+            <div class="info-field"><strong>Throughput:</strong><span>${total_throughput.toFixed(1)} Mbps</span></div>
             <div class="info-field"><strong>Connected:</strong><span>${connectedAGVs.length}/${this.agvs.length} UEs</span></div>
             <div class="info-field"><strong>Avg. RSRP:</strong><span>${avg_rsrp.toFixed(1)} dBm</span></div>
-            <div class="info-field"><strong>Avg. SINR:</strong><span>${avg_sinr.toFixed(1)} dB</span></div>
-            <div class="info-field"><strong>Total Throughput:</strong><span>${total_throughput.toFixed(1)} Mbps</span></div>`;
+            <div class="info-field"><strong>Avg. SINR:</strong><span>${avg_sinr.toFixed(1)} dB</span></div>`;
 
         const selectedBS = this.gNodeBs.find(b => b.userData.id === this.params.selectedBsId);
         if(selectedBS) {
@@ -608,7 +608,7 @@ class Simulation {
         const delta = this.clock.getDelta();
         if (!this.isPaused && delta > 0) {
             this.agvs.forEach(agv => this._updateAGVState(agv, delta));
-            this._updateConnectivityAndHandover();
+            this._updateConnectivity();
         }
         this._updateUI();
         this.controls.update();
