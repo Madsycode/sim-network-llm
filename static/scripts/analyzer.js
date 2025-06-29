@@ -49,7 +49,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function displayResponse(data) {
         document.getElementById('knowledge-results').textContent = JSON.stringify(data.dbResults, null, 2);
         document.getElementById('generated-cypher').textContent = data.generatedCypher;
-        document.getElementById('query-response').textContent = data.reasoningResponse;
+        document.getElementById('query-response').innerHTML = data.reasoningResponse;
         document.getElementById('user-question').textContent = data.userQuestion;
         resultsContainer.classList.remove('hidden');
     }

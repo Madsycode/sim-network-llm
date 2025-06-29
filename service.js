@@ -20,7 +20,8 @@ const session = driver.session();
 // --- GEMINI SETUP ---
 const gemeni = new GoogleGenerativeAI(GEMINI_API);
 const model = gemeni.getGenerativeModel({ model: GEMINI_MODEL });
-const sysPrompt = readFileSync('resources/prompt.md', 'utf-8').trim();
+const sysPrompt = readFileSync('resources/cypherPrompt.md', 'utf-8').trim();
+const analPrompt = readFileSync('resources/analysisPrompt.md', 'utf-8').trim();
 
 // --- MIDDLEWARE ---
 app.use(express.json());
@@ -40,7 +41,7 @@ app.post('/api/generate', async (req, res) => {
     console.log(`[1/3] Sending question to Gemini: "${userQuestion}"`);
     const chat = model.startChat({
       history: [{ role: "user", parts: [{ text: sysPrompt }] }],
-      generationConfig: { maxOutputTokens: 1000 },
+      generationConfig: { maxOutputTokens: 500 },
     });
 
     const result = await chat.sendMessage(userQuestion);
@@ -79,14 +80,26 @@ app.post('/api/generate', async (req, res) => {
 
     // Step 3a: Generate reasoning from Gemini
     console.log(`[4/4] Generating reasoning for the query.`);
+
     const reasoningChat = model.startChat({
-      history: [{ role: "user", parts: [{ text: `You are an expert in 5G network management and you are asked a question about the network to perform reasoning tasks. 
-      You should reason about the provided question based only on the provided knowledge graph results.` }] }],
+      history: [ { role: "user", parts: [ { text: analPrompt } ] } ],
       generationConfig: { maxOutputTokens: 1000 },
     });
+
     const reasoningResult = await reasoningChat.sendMessage(`\nQUESTION: 
-      ${userQuestion}\nKNOWLEDGE: ${JSON.stringify(dbResults)}\n`);
-    const reasoningResponse = reasoningResult.response.text().trim();
+      ${userQuestion}\nKNOWLEDGE: ${JSON.stringify(dbResults)}`);
+    let reasoningResponse = reasoningResult.response.text().trim();
+
+    // Clean up potential markdown code fences
+    if (reasoningResponse.startsWith('```html')) {
+      reasoningResponse = reasoningResponse.substring(7);
+    } else if (reasoningResponse.startsWith('```')) {
+      reasoningResponse = reasoningResponse.substring(3);
+    }
+    if (reasoningResponse.endsWith('```')) {
+        reasoningResponse = reasoningResponse.slice(0, -3);
+    }
+    reasoningResponse = reasoningResponse.trim();
     
     // Step 3: Send results back to the client
     res.json({
@@ -106,7 +119,7 @@ app.post('/api/generate', async (req, res) => {
 app.post('/api/create', async (req, res) => {
   const { gNodeBs, AGVs } = req.body;
   try {
-    const tx = session.beginTransaction();
+    const tx = session.beginTransaction();    
 
     for (const gnb of gNodeBs) {
       await tx.run(`MERGE (gnb:gNodeB { id: $id }) 

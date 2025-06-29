@@ -7,14 +7,14 @@ CREATE (freq1:Band {
   value_GHz: 3.5,
   label: 'Band n78',
   uplink_MHz: 3420,
-  downlink_MHz: 3500,
+  downlink_MHz: 3500
 }),
 (freq2:Band {
   id: 'n258',
   value_GHz: 26,
   label: 'Band n258',
   uplink_MHz: 24250,
-  downlink_MHz: 24500,
+  downlink_MHz: 24500
 });
 
 // === 6. Create Channels ===
