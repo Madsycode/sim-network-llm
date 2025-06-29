@@ -1,4 +1,6 @@
- const links = document.querySelectorAll('.sidebar-link');
+document.addEventListener('DOMContentLoaded', () => {
+    // load dom objects
+    const links = document.querySelectorAll('.sidebar-link');
     const sections = document.querySelectorAll('main > div > section');
 
     // Function to handle showing the correct section
@@ -42,3 +44,4 @@
 
     showSection(initialLink.getAttribute('href').substring(1));
     setActiveLink(initialLink);
+});

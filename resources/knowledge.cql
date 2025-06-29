@@ -3,7 +3,7 @@ MATCH (n) DETACH DELETE n;
 
 // === 1. Create Base Stations (gNodeB) ===
 CREATE (bs1:gNodeB {
-  id: 'gNodeB1',
+  id: 'gNodeB-1',
   label: 'gNodeB 01',
   capacity_mbps: 2000,
   status: 'active',
@@ -11,7 +11,7 @@ CREATE (bs1:gNodeB {
   band: 'n78'
 }),
 (bs2:gNodeB {
-  id: 'gNodeB2',
+  id: 'gNodeB-2',
   label: 'gNodeB 02',
   capacity_mbps: 1500,
   status: 'active',
@@ -19,7 +19,7 @@ CREATE (bs1:gNodeB {
   band: 'n258'
 }),
 (bs3:gNodeB {
-  id: 'gNodeB3',
+  id: 'gNodeB-3',
   label: 'gNodeB 03',
   capacity_mbps: 1800,
   status: 'maintenance', 
@@ -266,25 +266,25 @@ CREATE (service1:Service {
 // ===================================
 
 // === gNodeB -> Cell -> Sector ===
-MATCH (bs:gNodeB {id: 'gNodeB1'}), (cell:Cell {id: 'CellA'}) CREATE (bs)-[:HAS_CELL]->(cell);
-MATCH (bs:gNodeB {id: 'gNodeB2'}), (cell:Cell {id: 'CellB'}) CREATE (bs)-[:HAS_CELL]->(cell);
-MATCH (bs:gNodeB {id: 'gNodeB3'}), (cell:Cell {id: 'CellC'}) CREATE (bs)-[:HAS_CELL]->(cell);
+MATCH (bs:gNodeB {id: 'gNodeB-1'}), (cell:Cell {id: 'CellA'}) CREATE (bs)-[:HAS_CELL]->(cell);
+MATCH (bs:gNodeB {id: 'gNodeB-2'}), (cell:Cell {id: 'CellB'}) CREATE (bs)-[:HAS_CELL]->(cell);
+MATCH (bs:gNodeB {id: 'gNodeB-3'}), (cell:Cell {id: 'CellC'}) CREATE (bs)-[:HAS_CELL]->(cell);
 
 MATCH (cell:Cell {id: 'CellA'}), (sector:Sector {id: 'SectorA1'}) CREATE (cell)-[:HAS_SECTOR]->(sector);
 MATCH (cell:Cell {id: 'CellA'}), (sector:Sector {id: 'SectorA2'}) CREATE (cell)-[:HAS_SECTOR]->(sector);
 MATCH (cell:Cell {id: 'CellC'}), (sector:Sector {id: 'SectorC1'}) CREATE (cell)-[:HAS_SECTOR]->(sector);
 
 // === gNodeB Relationships ===
-MATCH (bs:gNodeB {id: 'gNodeB1'}), (freq:Frequency {id: 'n78'}) CREATE (bs)-[:OPERATES_ON]->(freq);
-MATCH (bs:gNodeB {id: 'gNodeB2'}), (freq:Frequency {id: 'n258'}) CREATE (bs)-[:OPERATES_ON]->(freq);
-MATCH (bs:gNodeB {id: 'gNodeB3'}), (freq:Frequency {id: 'n78'}) CREATE (bs)-[:OPERATES_ON]->(freq);
+MATCH (bs:gNodeB {id: 'gNodeB-1'}), (freq:Frequency {id: 'n78'}) CREATE (bs)-[:OPERATES_ON]->(freq);
+MATCH (bs:gNodeB {id: 'gNodeB-2'}), (freq:Frequency {id: 'n258'}) CREATE (bs)-[:OPERATES_ON]->(freq);
+MATCH (bs:gNodeB {id: 'gNodeB-3'}), (freq:Frequency {id: 'n78'}) CREATE (bs)-[:OPERATES_ON]->(freq);
 
-MATCH (bs:gNodeB {id: 'gNodeB1'}), (bh:Backhaul {id: 'BH01'}) CREATE (bs)-[:HAS_BACKHAUL]->(bh);
-MATCH (bs:gNodeB {id: 'gNodeB2'}), (bh:Backhaul {id: 'BH02'}) CREATE (bs)-[:HAS_BACKHAUL]->(bh);
-MATCH (bs:gNodeB {id: 'gNodeB3'}), (bh:Backhaul {id: 'BH01'}) CREATE (bs)-[:HAS_BACKHAUL]->(bh);
+MATCH (bs:gNodeB {id: 'gNodeB-1'}), (bh:Backhaul {id: 'BH01'}) CREATE (bs)-[:HAS_BACKHAUL]->(bh);
+MATCH (bs:gNodeB {id: 'gNodeB-2'}), (bh:Backhaul {id: 'BH02'}) CREATE (bs)-[:HAS_BACKHAUL]->(bh);
+MATCH (bs:gNodeB {id: 'gNodeB-3'}), (bh:Backhaul {id: 'BH01'}) CREATE (bs)-[:HAS_BACKHAUL]->(bh);
 
-MATCH (bs1:gNodeB {id: 'gNodeB1'}), (bs2:gNodeB {id: 'gNodeB2'}) CREATE (bs1)-[:PEERS_WITH {type:'Xn'}]->(bs2);
-MATCH (bs1:gNodeB {id: 'gNodeB1'}), (bs3:gNodeB {id: 'gNodeB3'}) CREATE (bs1)-[:PEERS_WITH {type:'Xn'}]->(bs3);
+MATCH (bs1:gNodeB {id: 'gNodeB-1'}), (bs2:gNodeB {id: 'gNodeB-2'}) CREATE (bs1)-[:PEERS_WITH {type:'Xn'}]->(bs2);
+MATCH (bs1:gNodeB {id: 'gNodeB-1'}), (bs3:gNodeB {id: 'gNodeB-3'}) CREATE (bs1)-[:PEERS_WITH {type:'Xn'}]->(bs3);
 
 // === UE Connections and Assignments ===
 MATCH (ue:UE {id: 'UE1001'}), (cell:Cell {id: 'CellA'}) CREATE (ue)-[:CONNECTED_TO]->(cell);
@@ -301,9 +301,9 @@ MATCH (slice:Slice {id: 'eMBB-1'}), (qos:QoS {id: 'QoS1'}) CREATE (slice)-[:ENFO
 MATCH (slice:Slice {id: 'URLLC-1'}), (qos:QoS {id: 'QoS2'}) CREATE (slice)-[:ENFORCES]->(qos);
 MATCH (slice:Slice {id: 'mMTC-1'}), (qos:QoS {id: 'QoS3'}) CREATE (slice)-[:ENFORCES]->(qos);
 
-MATCH (bs:gNodeB {id: 'gNodeB1'}), (slice:Slice {id: 'eMBB-1'}) CREATE (bs)-[:SUPPORTS]->(slice);
+MATCH (bs:gNodeB {id: 'gNodeB-1'}), (slice:Slice {id: 'eMBB-1'}) CREATE (bs)-[:SUPPORTS]->(slice);
 MATCH (bs:gNodeB), (slice:Slice {id: 'mMTC-1'}) CREATE (bs)-[:SUPPORTS]->(slice); // All BS support mMTC
-MATCH (bs:gNodeB {id: 'gNodeB2'}), (slice:Slice {id: 'URLLC-1'}) CREATE (bs)-[:SUPPORTS]->(slice);
+MATCH (bs:gNodeB {id: 'gNodeB-2'}), (slice:Slice {id: 'URLLC-1'}) CREATE (bs)-[:SUPPORTS]->(slice);
 
 // === UE Consuming Services ===
 MATCH (ue:UE {id: 'UE1001'}), (s:Service {id: 'SVC-VIDEO'})
@@ -348,12 +348,12 @@ MATCH (ue:UE {id: 'UE1001'}), (chan:Channel {id: 'CH100'}) CREATE (ue)-[:USES]->
 MATCH (ue:UE {id: 'UE1002'}), (chan:Channel {id: 'CH200'}) CREATE (ue)-[:USES]->(chan);
 
 // --- Physical Location of Base Stations ---
-MATCH (bs:gNodeB {id: 'gNodeB1'}), (loc:Location {id: 'LOC_TOWER_A'}) CREATE (bs)-[:LOCATED_AT]->(loc);
-MATCH (bs:gNodeB {id: 'gNodeB2'}), (loc:Location {id: 'LOC_TOWER_B'}) CREATE (bs)-[:LOCATED_AT]->(loc);
-MATCH (bs:gNodeB {id: 'gNodeB3'}), (loc:Location {id: 'LOC_INDUSTRIAL_PARK'}) CREATE (bs)-[:LOCATED_AT]->(loc);
+MATCH (bs:gNodeB {id: 'gNodeB-1'}), (loc:Location {id: 'LOC_TOWER_A'}) CREATE (bs)-[:LOCATED_AT]->(loc);
+MATCH (bs:gNodeB {id: 'gNodeB-2'}), (loc:Location {id: 'LOC_TOWER_B'}) CREATE (bs)-[:LOCATED_AT]->(loc);
+MATCH (bs:gNodeB {id: 'gNodeB-3'}), (loc:Location {id: 'LOC_INDUSTRIAL_PARK'}) CREATE (bs)-[:LOCATED_AT]->(loc);
 
 // --- Operational Alarms ---
-MATCH (bs:gNodeB {id: 'gNodeB3'}), (alarm:Alarm {id: 'ALM559'})
+MATCH (bs:gNodeB {id: 'gNodeB-3'}), (alarm:Alarm {id: 'ALM559'})
 CREATE (bs)-[:RAISES_ALARM]->(alarm);
 
 // --- Performance Metrics ---

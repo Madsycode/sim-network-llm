@@ -31,7 +31,8 @@
     </div>
 
     <!-- Header -->
-    <header class="flex-shrink-0 flex justify-between items-center h-16 p-6 border-b border-slate-700/70 bg-slate-800/70 backdrop-blur-sm shadow-lg z-10">
+    <header class="flex-shrink-0 flex justify-between items-center h-16 p-6 
+        border-b border-slate-700/70 bg-slate-800/70 backdrop-blur-sm shadow-lg z-10">
         <a href="#" target="_blank">
             <div class="flex items-center gap-3"> 
                 <img src="imgs/dfki.png" alt="DFKI Logo"
@@ -45,7 +46,7 @@
         </div>
     </header>
 
-    <!-- Content: Sidebar + Main -->
+    <!-- Content -->
     <div class="flex flex-1 overflow-hidden">
         <!-- Sidebar -->
         <aside
@@ -81,12 +82,10 @@
             </div>
         </aside>
 
-        <!-- Main Content -->
-        <main class="flex-1 flex flex-col bg-slate-900/80">
-            <!-- Content Sections -->             
+        <!-- Content -->
+        <main class="flex-1 flex flex-col bg-slate-900/80">          
             <div class="flex-1 overflow-y-auto p-4 md:p-4">
-
-               <!--------------- Simulation Section ----------------->                     
+               <!--------------- Vizualizer Section ----------------->                     
                 <section id="sim" class="h-full">
                     <div class="flex flex-1 overflow-hidden h-full space-x-4">
                         
@@ -116,15 +115,15 @@
                                     <i class="fas fa-gears"></i> Simulation Configs</h3>                                
                                 
                                 <div class="flex items-center mb-2">
-                                    <label for="factoryArea">Area (m<sup>2</sup>): <span id="factoryAreaValue">100</span></label>
-                                    <input type="range" id="factoryArea" name="factoryArea" min="100" max="1000" value="100" step="10">
+                                    <label for="factoryArea">Area (m<sup>2</sup>): <span id="factoryAreaValue">250</span></label>
+                                    <input type="range" id="factoryArea" name="factoryArea" min="100" max="1000" value="250" step="10">
                                 </div>
                                 <div class="flex items-center mb-2">
                                     <label for="bgDensity">gNodeBs: <span id="bsDensityValue">4</span></label>
                                     <input type="range" id="bsDensity" name="bsDensity" min="1" max="4" value="4" step="1">
                                 </div>
                                 <div class="flex items-center mb-2">
-                                    <label for="bgDensity">AGVs: <span id="ueDensityValue">5</span></label>
+                                    <label for="bgDensity">AGVs: <span id="ueDensityValue">10</span></label>
                                     <input type="range" id="ueDensity" name="ueDensity" min="1" max="10" value="5" step="1">
                                 </div>
                                 <div class="flex items-center mb-2">
@@ -171,17 +170,12 @@
                                     <div class="info-field"><strong>Throughput:</strong><span id="ueThroughput"></span></div>
                                     <div class="info-field"><strong>Connected to:</strong><span id="ueConnectedBs"></span></div>
                                 </div>
-                            </div>
-                            <!-- <div id="simulationLogs-container" class="bg-slate-900 p-4 rounded shadow">
-                                <h3 class="text-md font-semibold pb-2 text-blue-400">
-                                    <i class="fas fa-terminal"></i> Console</h3>
-                                <div id="simulationLogs" class="h-40 text-xs p-2 bg-slate-800/100 rounded overflow-auto break-words"></div>
-                            </div> -->
+                            </div>                            
                         </aside>
                     </div>
                 </section>
                 
-                <!--------------- Chat Section ----------------->       
+                <!--------------- Analyzer Section ----------------->       
                 <section id="chats" class="hidden">
                     <div class="flex items-center justify-center min-h-full">                        
                         <div id="no-query" class="text-center mt-20">
@@ -245,7 +239,7 @@
                     </div>
                 </section>
 
-                <!--------------- Graph Section ----------------->
+                <!--------------- Database Section ----------------->
                 <section id="graph" class="hidden h-full">
                     <div id="graph-container" class="h-full bg-slate-900/80">
                         <div id="tooltip" class="tooltip"></div>
@@ -253,17 +247,7 @@
                     </div>
                 </section>
                 
-                <!--------------- About Section ----------------->
-                <section id="about" class="hidden">
-                    <div class="text-center">
-                        <i class="fas fa-info-circle text-5xl text-slate-600 mb-4"></i>
-                        <h1 class="text-2xl font-bold text-slate-300">About Network Analyzer</h1>
-                        <p class="text-slate-400 mt-2 max-w-xl mx-auto">This tool uses AI to translate natural language
-                            queries into database queries to analyze and visualize complex network graphs.</p>
-                    </div>
-                </section>
-
-                <!--------------- Settings Section ----------------->
+                <!--------------- Configs Section ----------------->
                 <section id="settings" class="hidden">
                     <div class="text-center">
                         <i class="fas fa-cogs text-5xl text-slate-600 mb-4"></i>
@@ -272,6 +256,16 @@
                         </p>
                     </div>
                 </section>
+
+                <!--------------- About Section ----------------->
+                <section id="about" class="hidden">
+                    <div class="text-center">
+                        <i class="fas fa-info-circle text-5xl text-slate-600 mb-4"></i>
+                        <h1 class="text-2xl font-bold text-slate-300">About Network Analyzer</h1>
+                        <p class="text-slate-400 mt-2 max-w-xl mx-auto">This tool uses AI to translate natural language
+                            queries into database queries to analyze and visualize complex network graphs.</p>
+                    </div>
+                </section>                
             </div>           
         </main>
     </div>
@@ -286,9 +280,10 @@
         }
     </script>
 
-    <script src="scripts/vizualizer.js" type="module"></script>
     <script src="scripts/analyzer.js" type="module"></script>
-    <script src="scripts/sidenav.js" type="module"></script>
+    <script src="scripts/graph.js" type="module"></script>
+    <script src="scripts/index.js" type="module"></script>
+    <script src="scripts/viz.js" type="module"></script>
 </body>
 
 </html>
