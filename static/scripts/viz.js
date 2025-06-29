@@ -118,6 +118,27 @@ class Simulation {
         this.log('Initialization complete.', 'SUCCESS');
     }
 
+    async _runQuery(query) {
+        try {
+            const response = await fetch('/api/query', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query })
+            });
+
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.error || 'Query failed!');
+            }
+
+            // Optional: return success or result if needed
+            return await response.json();
+        } catch (error) {
+            this.log(`_runQuery failed for query: "${query}". 
+                Error: ${error.message}`, 'ERROR');
+        }
+    }
+
     async _createGraph() {
         try {
             const payload = {
@@ -565,6 +586,18 @@ class Simulation {
             if (!currentBS || bestSignal.rsrp_dbm > currentRSRP + CONFIGS.handoverMarginDB) {
                 this.log(`DEBUG: ${agv.userData.id} to ${bestSignal.bs.userData.id} (RSRP: ${bestSignal.rsrp_dbm.toFixed(1)}dBm)`, 'DEBUG');
                 agv.userData.connected_bs = bestSignal.bs.userData.id;
+
+                // The cypher query 
+                const cypher = `
+                    MATCH (agv:AGV {id: '${agv.userData.id}'})
+                    OPTIONAL MATCH (agv)-[r:CONNECTED_TO]->()
+                    DELETE r
+                    WITH agv
+                    MATCH (gnb:gNodeB {id: '${bestSignal.bs.userData.id}'})
+                    MERGE (agv)-[:CONNECTED_TO]->(gnb)`;
+
+                // execute query
+                this._runQuery(cypher);
             }
             
             const servingBS = this.gNodeBs.find(b => b.userData.id === agv.userData.connected_bs);

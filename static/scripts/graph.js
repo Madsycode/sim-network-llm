@@ -1,5 +1,11 @@
 document.addEventListener('DOMContentLoaded', () => {
     const graphContainer = document.getElementById('graph-container');
+    const reloadBtn = document.getElementById('reloadGraphBtn');
+
+    reloadBtn.addEventListener('click', () => {
+        fetch('/api/graph').then(response => response.json())
+            .then(graph => displayGraph(graph));
+    })
 
     // Fetch and display knowledge graph
     fetch('/api/graph').then(response => response.json())
@@ -29,10 +35,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const nodeShapes = {
             QoS: d3.symbolSquare,
-            Cell: d3.symbolSquare,
+            Band: d3.symbolSquare,
             Channel: d3.symbolSquare,
-            Location: d3.symbolSquare,
-            Frequency: d3.symbolSquare,
         };
 
         const symbolGenerator = d3.symbol().size(d => {
@@ -46,8 +50,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Initialize the simulation
         const simulation = d3.forceSimulation(graph.nodes)
-            .force("link", d3.forceLink(graph.links).id(d => d.id).distance(400))
-            .force("charge", d3.forceManyBody().strength(-500))
+            .force("link", d3.forceLink(graph.links).id(d => d.id).distance(300))
+            .force("charge", d3.forceManyBody().strength(-150))
             .force("center", d3.forceCenter(width / 2, height / 2));
 
         // Arrowheads for links

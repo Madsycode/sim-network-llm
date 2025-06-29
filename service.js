@@ -3,7 +3,6 @@ import { readFileSync } from 'fs';
 import neo4j from 'neo4j-driver';
 import express from 'express';
 import dotenv from 'dotenv';
-import { stringify } from 'querystring';
 
 // --- CONFIGS ---
 dotenv.config();
@@ -167,25 +166,28 @@ app.post('/api/create', async (req, res) => {
   } 
 });
 
-app.post('/api/query', async (req, res) => {
+// POST /api/query
+app.post('/api/query', async (req, res) => {  
   const { query } = req.body;
+  if (!query) {
+    return res.status(400).json({ error: 'Query is required.' });
+  }
+
+  const thesession = driver.session();
   try {
-    const tx = session.beginTransaction();
-    await tx.run(query);
-    await tx.commit();
-    res.json({ success: true });
-  } 
-  catch (error) {
-    res.status(500).json({ error: `${query}\n${error}` });
-  } 
+    const result = await thesession.run(query);
+    res.status(200).json(result.records);
+  } catch (error) {
+    console.error(`Neo4j Query ${query} Error:${error}`);
+    res.status(500).json({ error: error.message });
+  } finally {
+    await thesession.close();
+  }
 });
 
 // --- GRAPH API ENDPOINT ---
-app.get('/api/graph', async (req, res) => {
-  //let session;
-
+app.get('/api/graph', async (req, res) => {  
   try {
-    //session = driver.session({ defaultAccessMode: neo4j.session.READ });
     const result = await session.run('MATCH (n) OPTIONAL MATCH (n)-[r]->(m) RETURN n, r, m');
     const nodesMap = new Map();
     const links = [];
@@ -230,18 +232,13 @@ app.get('/api/graph', async (req, res) => {
   } 
 });
 
-// --- START SERVER ---
-app.listen(PORT, () => {
-  console.log(`Server is running at http://localhost:${PORT}`);
-});
-
 // --- ON SHUTDOWN ---
 async function shutdown() {
   console.log('Shutting down...');
   try {
     if(session){
-      await session.close();
-      await driver.close();
+      //await session.close();
+      driver.close();
       console.log('Neo4j driver closed.');
     }
   } catch (err) {
@@ -251,3 +248,8 @@ async function shutdown() {
 
 process.on('SIGINT', shutdown);   // Ctrl+C
 process.on('SIGTERM', shutdown);  // kill or system shutdown
+
+// --- START SERVER ---
+app.listen(PORT, () => {
+  console.log(`Server is running at http://localhost:${PORT}`);
+});

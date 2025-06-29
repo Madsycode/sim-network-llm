@@ -240,10 +240,17 @@
                 </section>
 
                 <!--------------- Database Section ----------------->
-                <section id="graph" class="hidden h-full">
-                    <div id="graph-container" class="h-full bg-slate-900/80">
+               <section id="graph" class="hidden h-full relative">
+                    <div id="graph-container" class="h-full bg-slate-900/80 relative">
                         <div id="tooltip" class="tooltip"></div>
                         <svg width="100%" height="100%"></svg>
+
+                        <!-- Button in top-right corner -->
+                        <div id="graphControls" class="absolute top-4 right-4 z-10">
+                            <button id="reloadGraphBtn" class="bg-blue-500 text-white px-4 py-2 rounded shadow hover:bg-blue-600 transition">
+                                <i class="fas fa-redo"></i> Reload
+                            </button>
+                        </div>
                     </div>
                 </section>
                 

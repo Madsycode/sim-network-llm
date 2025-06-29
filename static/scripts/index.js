@@ -29,10 +29,8 @@ document.addEventListener('DOMContentLoaded', () => {
         link.addEventListener('click', e => {
             e.preventDefault();
             const targetId = link.getAttribute('href').substring(1);
-
             // Update the URL hash without jumping
             history.pushState(null, null, `#${targetId}`);
-
             showSection(targetId);
             setActiveLink(link);
         });
