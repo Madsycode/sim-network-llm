@@ -46,11 +46,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    function displayResponse(data) {
-        document.getElementById('knowledge-results').textContent = JSON.stringify(data.dbResults, null, 2);
-        document.getElementById('generated-cypher').textContent = data.generatedCypher;
-        document.getElementById('query-response').innerHTML = data.reasoningResponse;
-        document.getElementById('user-question').textContent = data.userQuestion;
+    function displayResponse(response) {
+        document.getElementById('knowledge-results').textContent = JSON.stringify(response.dbResults, null, 2);
+        document.getElementById('generated-cypher').textContent = response.generatedCypher;
+        document.getElementById('query-response').innerHTML = response.reasoningResponse;
+        document.getElementById('user-question').textContent = response.userQuestion;
         resultsContainer.classList.remove('hidden');
     }
 
