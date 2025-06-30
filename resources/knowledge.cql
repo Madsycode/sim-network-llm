@@ -1,6 +1,3 @@
-// === Cleanup ===
-//MATCH (n) DETACH DELETE n;
-
 // === 5. Create Frequencies ===
 CREATE (freq1:Band {
   id: 'n78',

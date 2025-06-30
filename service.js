@@ -20,6 +20,7 @@ const session = driver.session();
 // --- GEMINI SETUP ---
 const gemeni = new GoogleGenerativeAI(GEMINI_API);
 const model = gemeni.getGenerativeModel({ model: GEMINI_MODEL });
+const knowledge = readFileSync('resources/knowledge.cql', 'utf-8').trim();
 const sysPrompt = readFileSync('resources/cypherPrompt.md', 'utf-8').trim();
 const analPrompt = readFileSync('resources/analysisPrompt.md', 'utf-8').trim();
 
@@ -35,7 +36,6 @@ app.post('/api/generate', async (req, res) => {
       message: "Question is required." });
   }
 
-  //let session;
   try {
     // Step 1: Generate Cypher Query from Gemini
     console.log(`[1/3] Sending question to Gemini: "${userQuestion}"`);
@@ -118,8 +118,10 @@ app.post('/api/generate', async (req, res) => {
 // --- INIT-GRAPH API ENDPOINT ---
 app.post('/api/create', async (req, res) => {
   const { gNodeBs, AGVs } = req.body;
+  const thesession = driver.session();
   try {
-    const tx = session.beginTransaction();    
+    const tx = thesession.beginTransaction();    
+    await tx.run('MATCH (n) DETACH DELETE n');
 
     for (const gnb of gNodeBs) {
       await tx.run(`MERGE (gnb:gNodeB { id: $id }) 
@@ -171,12 +173,24 @@ app.post('/api/create', async (req, res) => {
       );
     }
 
+    const queries = knowledge
+      .split(';')
+      .map(q => q.trim())
+      .filter(q => q.length > 0);
+
+    for (const query of queries) {
+      await session.run(query);
+    }
+
     await tx.commit();
     res.json({ success: true });
   } 
   catch (error) {
     res.status(500).json({ error: error.message });
   } 
+  finally {
+    await thesession.close();
+  }
 });
 
 // POST /api/query
@@ -190,10 +204,12 @@ app.post('/api/query', async (req, res) => {
   try {
     const result = await thesession.run(query);
     res.status(200).json(result.records);
-  } catch (error) {
+  } 
+  catch (error) {
     console.error(`Neo4j Query ${query} Error:${error}`);
     res.status(500).json({ error: error.message });
-  } finally {
+  } 
+  finally {
     await thesession.close();
   }
 });
