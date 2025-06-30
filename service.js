@@ -123,7 +123,7 @@ app.post('/api/create', async (req, res) => {
   const session = driver.session();
   try {
     const tx = session.beginTransaction();    
-    await tx.run('MATCH (n) DETACH DELETE n');
+    //await tx.run('MATCH (n) DETACH DELETE n');
 
     for (const gnb of gNodeBs) {
       await tx.run(`MERGE (gnb:gNodeB { id: $id }) 
@@ -175,14 +175,14 @@ app.post('/api/create', async (req, res) => {
       );
     }
 
-    const queries = knowledge
-      .split(';')
-      .map(q => q.trim())
-      .filter(q => q.length > 0);
+    // const queries = knowledge
+    //   .split(';')
+    //   .map(q => q.trim())
+    //   .filter(q => q.length > 0);
 
-    for (const query of queries) {
-      await session.run(query);
-    }
+    // for (const query of queries) {
+    //   await session.run(query);
+    // }
 
     await tx.commit();
     res.json({ success: true });
@@ -254,10 +254,8 @@ app.get('/api/graph', async (req, res) => {
         });
       } 
     });
-
     const nodes = Array.from(nodesMap.values());
     res.json({ nodes, links });
-
   } 
   catch (error) {
     res.status(500).json({ message: error.message || "Internal Server Error" });
@@ -271,7 +269,7 @@ app.get('/api/graph', async (req, res) => {
 async function shutdown() {
   console.log('Shutting down...');
   try {
-    driver.close();
+    await driver.close();
     console.log('Neo4j driver closed.');
   } 
   catch (err) {
@@ -284,5 +282,5 @@ process.on('SIGINT', shutdown);
 
 // --- START SERVER ---
 app.listen(PORT, () => {
-  console.log(`Server is running at http://localhost:${PORT}`);
+  console.log(`Service is running at http://localhost:${PORT}`);
 });

@@ -112,9 +112,12 @@ class Simulation {
 
         this._setupEventListeners();
         this.resetSimulation();
-        this._createGraph();
-        this._animate();
 
+        // this.intervalId = setInterval(() => {
+        //     this._createGraph();
+        // }, 5000);
+
+        this._animate();
         this.log('Initialization complete.', 'SUCCESS');
     }
 
@@ -156,7 +159,7 @@ class Simulation {
                 const errorData = await response.json().catch(() => ({}));
                 throw new Error(errorData.error || 'Failed to create graph nodes.');
             }
-            this.log('Knowledge Graph successfully created.', 'DEBUG');
+            this.log('Knowledge Graph successfully updated.', 'DEBUG');
         } 
         catch (error) {
             this.log(`Graph creation error: ${error.message}`, 'ERROR');
@@ -165,6 +168,16 @@ class Simulation {
     
     togglePause() { 
         this.isPaused = !this.isPaused; 
+
+        if(this.isPaused === false) {
+            this.intervalId = setInterval(() => {
+                this._createGraph();
+            }, 5000);
+        }
+        else {
+            clearInterval(this.intervalId);
+        }
+
         this.dom.pauseButton.innerHTML = this.isPaused ? 
         `<i class="fa-solid fa-play"></i> Start` : 
         `<i class="fa-solid fa-pause"></i> Pause`; 
@@ -595,13 +608,17 @@ class Simulation {
                     WITH agv
                     MATCH (gnb:gNodeB {id: '${bestSignal.bs.userData.id}'})
                     MERGE (agv)-[:CONNECTED_TO]->(gnb)`;
-
                 // execute query
                 this._runQuery(cypher);
             }
             
             const servingBS = this.gNodeBs.find(b => b.userData.id === agv.userData.connected_bs);
-            if(!servingBS) { agv.userData.rsrp_dbm = -140; agv.userData.sinr_db = -20; agv.userData.throughput_mbps = 0; continue; }
+            if(!servingBS) { 
+                agv.userData.throughput_mbps = 0; 
+                agv.userData.rsrp_dbm = -140; 
+                agv.userData.sinr_db = -20; 
+                continue; 
+            }
             
             const servingRSRP_dbm = signals.find(s => s.bs.userData.id === servingBS.userData.id).rsrp_dbm;
             const servingRSRPWatts = UTILS.dbmToWatts(servingRSRP_dbm);
