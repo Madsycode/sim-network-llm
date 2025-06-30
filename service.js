@@ -5,9 +5,9 @@ import express from 'express';
 import dotenv from 'dotenv';
 
 // --- CONFIGS ---
-dotenv.config();
-const app = express();
 const PORT = process.env.PORT || 3000;
+const app = express();
+dotenv.config();
 
 // --- NEO4J SETUP ---
 const { NEO4J_URI, NEO4J_USER, NEO4J_PASS, GEMINI_API, GEMINI_MODEL } = process.env;
@@ -15,26 +15,25 @@ if (!NEO4J_URI || !NEO4J_USER || !NEO4J_PASS || !GEMINI_API || !GEMINI_MODEL) {
   throw new Error("Missing environment variables. Check your .env file.");
 }
 const driver = neo4j.driver(NEO4J_URI, neo4j.auth.basic(NEO4J_USER, NEO4J_PASS));
-const session = driver.session();
+const knowledge = readFileSync('resources/knowledge.cql', 'utf-8').trim();
 
 // --- GEMINI SETUP ---
 const gemeni = new GoogleGenerativeAI(GEMINI_API);
 const model = gemeni.getGenerativeModel({ model: GEMINI_MODEL });
-const knowledge = readFileSync('resources/knowledge.cql', 'utf-8').trim();
 const sysPrompt = readFileSync('resources/cypherPrompt.md', 'utf-8').trim();
 const analPrompt = readFileSync('resources/analysisPrompt.md', 'utf-8').trim();
 
 // --- MIDDLEWARE ---
-app.use(express.json());
 app.use(express.static('static')); 
+app.use(express.json());
 
 // --- REASONING API ENDPOINT ---
 app.post('/api/generate', async (req, res) => {
   const userQuestion = req.body.question;
   if (!userQuestion) {
-    return res.status(400).json({ 
-      message: "Question is required." });
+    return res.status(400).json({ message: "Question is required." });
   }
+  const session = driver.session();
 
   try {
     // Step 1: Generate Cypher Query from Gemini
@@ -45,8 +44,8 @@ app.post('/api/generate', async (req, res) => {
     });
 
     const result = await chat.sendMessage(userQuestion);
-    const response = result.response;
-    let generatedCypher = response.text().trim();
+    let generatedCypher = result.response.text().trim();
+    //const response = result.response;
     
     // Clean up potential markdown code fences
     if (generatedCypher.startsWith('```cypher')) {
@@ -62,21 +61,20 @@ app.post('/api/generate', async (req, res) => {
     console.log(`[2/3] Received Cypher from Gemini:\n${generatedCypher}`);
 
     // Step 2: Execute Cypher Query against Neo4j
-    //session = driver.session();
     const dbResult = await session.run(generatedCypher);
     
     // Convert Neo4j's integer types and records to JS
     const dbResults = dbResult.records.map(record => {
       const obj = {};
       record.keys.forEach(key => {
-        obj[key] = neo4j.graph.isNode(record.get(key)) || neo4j.graph.isRelationship(record.get(key)) 
-          ? record.get(key).properties 
-          : record.get(key);
+        obj[key] = neo4j.graph.isNode(record.get(key)) || 
+          neo4j.graph.isRelationship(record.get(key)) ? 
+          record.get(key).properties : record.get(key);
       });
       return obj;
     });
     
-    console.log(`[3/3] Successfully executed query. Found ${dbResults.length} records.`);
+    console.log(`[3/3] Successfully executed cypher query.`);
 
     // Step 3a: Generate reasoning from Gemini
     console.log(`[4/4] Generating reasoning for the query.`);
@@ -109,18 +107,22 @@ app.post('/api/generate', async (req, res) => {
       dbResults
     });
 
-  } catch (error) {
+  } 
+  catch (error) {
     console.error("An error occurred in the /api/query endpoint:", error);
     res.status(500).json({ message: error.message || "An internal server error occurred." });
   } 
+  finally{
+    await session.close();
+  }
 });
 
 // --- INIT-GRAPH API ENDPOINT ---
 app.post('/api/create', async (req, res) => {
   const { gNodeBs, AGVs } = req.body;
-  const thesession = driver.session();
+  const session = driver.session();
   try {
-    const tx = thesession.beginTransaction();    
+    const tx = session.beginTransaction();    
     await tx.run('MATCH (n) DETACH DELETE n');
 
     for (const gnb of gNodeBs) {
@@ -189,20 +191,20 @@ app.post('/api/create', async (req, res) => {
     res.status(500).json({ error: error.message });
   } 
   finally {
-    await thesession.close();
+    await session.close();
   }
 });
 
-// POST /api/query
+// --- RUN QUERY API ENDPOINT ---
 app.post('/api/query', async (req, res) => {  
   const { query } = req.body;
   if (!query) {
     return res.status(400).json({ error: 'Query is required.' });
   }
 
-  const thesession = driver.session();
+  const session = driver.session();
   try {
-    const result = await thesession.run(query);
+    const result = await session.run(query);
     res.status(200).json(result.records);
   } 
   catch (error) {
@@ -210,12 +212,13 @@ app.post('/api/query', async (req, res) => {
     res.status(500).json({ error: error.message });
   } 
   finally {
-    await thesession.close();
+    await session.close();
   }
 });
 
 // --- GRAPH API ENDPOINT ---
 app.get('/api/graph', async (req, res) => {  
+  const session = driver.session();
   try {
     const result = await session.run('MATCH (n) OPTIONAL MATCH (n)-[r]->(m) RETURN n, r, m');
     const nodesMap = new Map();
@@ -259,24 +262,25 @@ app.get('/api/graph', async (req, res) => {
   catch (error) {
     res.status(500).json({ message: error.message || "Internal Server Error" });
   } 
+  finally{
+    await session.close();
+  }
 });
 
 // --- ON SHUTDOWN ---
 async function shutdown() {
   console.log('Shutting down...');
   try {
-    if(session){
-      //await session.close();
-      driver.close();
-      console.log('Neo4j driver closed.');
-    }
-  } catch (err) {
+    driver.close();
+    console.log('Neo4j driver closed.');
+  } 
+  catch (err) {
     console.error('Error during shutdown:', err);
   }
 }
 
-process.on('SIGINT', shutdown);   // Ctrl+C
-process.on('SIGTERM', shutdown);  // kill or system shutdown
+process.on('SIGINT', shutdown);  
+process.on('SIGTERM', shutdown); 
 
 // --- START SERVER ---
 app.listen(PORT, () => {
