@@ -15,8 +15,17 @@ Below is the layout of the simulation environment:
 
 ## Getting Started
 1. Clone the repository.
-2. Install dependencies.
-3. Run the simulation.
+2. create a .env file with the following code
+
+NEO4J_USER=neo4j
+NEO4J_PASS=wipo0002
+NEO4J_URI=bolt://localhost:7687
+
+GEMINI_MODEL="gemini-2.0-flash"
+GEMINI_API="Your google API key"
+
+3. Install dependencies: npm install
+4. Run the simulation: npm start
 
 ## License
 This project is licensed under the Apache License.
