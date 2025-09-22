@@ -17,8 +17,8 @@ Below is the layout of the simulation environment:
 1. Clone the repository.
 2. create a .env file with the following code
 
-NEO4J_USER=neo4j
-NEO4J_PASS=wipo0002
+NEO4J_USER=neo4jdb
+NEO4J_PASS=password
 NEO4J_URI=bolt://localhost:7687
 
 GEMINI_MODEL="gemini-2.0-flash"
