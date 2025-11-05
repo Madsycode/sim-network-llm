@@ -77,6 +77,154 @@ class Simulation {
         this._initialize();
     }
     
+    // configuration for nav grid
+    _navConfig = { cellSize: 2.5, cols: 0, rows: 0, originX: 0, originZ: 0, grid: null };
+
+    _buildNavGrid() {
+        const size = this.params.factorySize;
+        const cs = this._navConfig.cellSize;
+        this._navConfig.cols = Math.ceil(size / cs);
+        this._navConfig.rows = Math.ceil(size / cs);
+        this._navConfig.originX = -size / 2;
+        this._navConfig.originZ = -size / 2;
+        // initialize grid with 0 = free, 1 = blocked
+        this._navConfig.grid = new Array(this._navConfig.rows).fill(0).map(()=> new Uint8Array(this._navConfig.cols));
+
+        // mark cells intersecting collidable objects as blocked
+        const tmpBox = new THREE.Box3();
+        for (const obj of this.collidableObjects) {
+            obj.updateMatrixWorld();
+            tmpBox.setFromObject(obj);
+            // expand box slightly to ensure safe clearance
+            tmpBox.expandByScalar(0.6);
+            // convert to grid extents
+            const minI = Math.max(0, Math.floor((tmpBox.min.x - this._navConfig.originX) / cs));
+            const maxI = Math.min(this._navConfig.cols - 1, Math.floor((tmpBox.max.x - this._navConfig.originX) / cs));
+            const minJ = Math.max(0, Math.floor((tmpBox.min.z - this._navConfig.originZ) / cs));
+            const maxJ = Math.min(this._navConfig.rows - 1, Math.floor((tmpBox.max.z - this._navConfig.originZ) / cs));
+            for (let j = minJ; j <= maxJ; j++) {
+                for (let i = minI; i <= maxI; i++) {
+                    this._navConfig.grid[j][i] = 1;
+                }
+            }
+        }
+    }
+
+    // world position -> grid indices
+    _worldToGrid(pos) {
+        const cs = this._navConfig.cellSize;
+        const i = Math.floor((pos.x - this._navConfig.originX) / cs);
+        const j = Math.floor((pos.z - this._navConfig.originZ) / cs);
+        return { i, j };
+    }
+
+    // grid indices -> world position (center of cell)
+    _gridToWorld(i, j) {
+        const cs = this._navConfig.cellSize;
+        const x = this._navConfig.originX + i * cs + cs / 2;
+        const z = this._navConfig.originZ + j * cs + cs / 2;
+        return new THREE.Vector3(x, 0.5, z);
+    }
+
+    // Manhattan / Euclidean heuristic
+    _hCost(a, b) { return Math.hypot(a.i - b.i, a.j - b.j); }
+
+    // neighbors (8-connected)
+    _getNeighbors(node) {
+        const dirs = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
+        const nb = [];
+        for (const d of dirs) {
+            const ni = node.i + d[0], nj = node.j + d[1];
+            if (ni >= 0 && ni < this._navConfig.cols && nj >= 0 && nj < this._navConfig.rows) {
+                if (this._navConfig.grid[nj][ni] === 0) nb.push({ i: ni, j: nj });
+            }
+        }
+        return nb;
+    }
+
+    // A* returning an array of world Vector3 waypoints or null
+    _findPathWorld(startVec, goalVec) {
+        if (!this._navConfig.grid) this._buildNavGrid();
+        const start = this._worldToGrid(startVec);
+        const goal = this._worldToGrid(goalVec);
+        // clamp indices
+        start.i = Math.min(Math.max(start.i,0), this._navConfig.cols-1);
+        start.j = Math.min(Math.max(start.j,0), this._navConfig.rows-1);
+        goal.i = Math.min(Math.max(goal.i,0), this._navConfig.cols-1);
+        goal.j = Math.min(Math.max(goal.j,0), this._navConfig.rows-1);
+
+        // if start or goal on blocked cell, attempt to find nearest free neighbor (small search radius)
+        const snapToFree = (cell) => {
+            if (this._navConfig.grid[cell.j][cell.i] === 0) return cell;
+            const radius = 3;
+            for (let r = 1; r <= radius; r++) {
+                for (let dj = -r; dj <= r; dj++) {
+                    for (let di = -r; di <= r; di++) {
+                        const ni = cell.i + di, nj = cell.j + dj;
+                        if (ni >=0 && ni < this._navConfig.cols && nj >=0 && nj < this._navConfig.rows) {
+                            if (this._navConfig.grid[nj][ni] === 0) return { i: ni, j: nj };
+                        }
+                    }
+                }
+            }
+            return null;
+        };
+        const s = snapToFree(start), g = snapToFree(goal);
+        if (!s || !g) return null;
+
+        // A*
+        const key = (n)=> `${n.i},${n.j}`;
+        const open = new Map();
+        const closed = new Set();
+        const gScore = new Map();
+        const fScore = new Map();
+        const cameFrom = new Map();
+
+        open.set(key(s), s); gScore.set(key(s), 0); fScore.set(key(s), this._hCost(s,g));
+
+        while (open.size > 0) {
+            // pick node with lowest f
+            let currentKey, current;
+            for (const [k,n] of open) {
+                if (!current || (fScore.get(k) < fScore.get(currentKey))) { current = n; currentKey = k; }
+            }
+            if (current.i === g.i && current.j === g.j) {
+                // reconstruct
+                const path = [];
+                let curK = currentKey;
+                while (cameFrom.has(curK)) {
+                    const parts = curK.split(',').map(Number);
+                    path.push({ i: parts[0], j: parts[1] });
+                    curK = cameFrom.get(curK);
+                }
+                // add start
+                const sparts = curK.split(',').map(Number);
+                path.push({ i: sparts[0], j: sparts[1] });
+                path.reverse();
+                // reduce path by converting to world points and pruning near-collinear points
+                const waypoints = path.map(p => this._gridToWorld(p.i, p.j));
+                return waypoints;
+            }
+
+            open.delete(currentKey);
+            closed.add(currentKey);
+
+            for (const nb of this._getNeighbors(current)) {
+                const nk = key(nb);
+                if (closed.has(nk)) continue;
+                const tentativeG = gScore.get(currentKey) + this._hCost(current, nb);
+                const existingG = gScore.get(nk);
+                if (!open.has(nk) || tentativeG < existingG) {
+                    cameFrom.set(nk, currentKey);
+                    gScore.set(nk, tentativeG);
+                    fScore.set(nk, tentativeG + this._hCost(nb, g));
+                    if (!open.has(nk)) open.set(nk, nb);
+                }
+            }
+        }
+        return null;
+    }
+
     _initialize() {
         this.log('Initializing simulation...', 'DEBUG');
         this.scene.background = new THREE.Color(0x1a202c);
@@ -112,12 +260,8 @@ class Simulation {
 
         this._setupEventListeners();
         this.resetSimulation();
-
-        // this.intervalId = setInterval(() => {
-        //     this._createGraph();
-        // }, 5000);
-
         this._animate();
+
         this.log('Initialization complete.', 'SUCCESS');
     }
 
@@ -312,7 +456,7 @@ class Simulation {
         const canvas = document.createElement('canvas');
         canvas.width = 512; canvas.height = 512;
         const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#404040'; ctx.fillRect(0, 0, 512, 512);
+        ctx.fillStyle = '#454945'; ctx.fillRect(0, 0, 512, 512);
         for (let i = 0; i < 5000; i++) {
             ctx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.1})`;
             ctx.beginPath();
@@ -366,6 +510,8 @@ class Simulation {
     }
 
     log(message, type = 'EVENT') {
+        if(type === 'ERROR') return;
+
         const colors = {
             'WARN': '#ffe100ff', 
             'ERROR': '#f87171', 
@@ -434,11 +580,12 @@ class Simulation {
         crossbar.position.y = mastHeight - 2; crossbar.rotation.z = Math.PI / 2;
         bsGroup.add(crossbar);
 
-        const light = new THREE.PointLight(0x00ff00, 10, 25);
+        // change creation of light and lightSphere
+        const light = new THREE.PointLight(0x00aaff, 3, 30);
         light.position.y = mastHeight + 1; light.name = 'status_light';
         bsGroup.add(light);
-
-        const lightSphere = new THREE.Mesh(new THREE.SphereGeometry(0.5, 15, 15), new THREE.MeshStandardMaterial({ emissive: 0x00ff00, emissiveIntensity: 10 }));
+        const lightSphere = new THREE.Mesh(new THREE.SphereGeometry(0.35, 12, 12),
+            new THREE.MeshStandardMaterial({ emissive: 0x00aaff, emissiveIntensity: 3 }));
         lightSphere.position.copy(light.position);
         bsGroup.add(lightSphere);
 
@@ -466,10 +613,17 @@ class Simulation {
 
     _createUE(id) {
         const agvGroup = new THREE.Group();        
-        const bodyMat = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.5, roughness: 0.4 });
+        const bodyMat = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.6, roughness: 0.3, envMapIntensity: 0.5 });
         const wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.8 });
-        const body = new THREE.Mesh(new THREE.BoxGeometry(3.0, 0.8, 2.0), bodyMat);
-        body.castShadow = true; 
+        const body = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.9, 2.2), bodyMat);
+        body.castShadow = true; body.receiveShadow = true;
+
+        // add low-profile bumper for visual and collision padding
+        const bumper = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.25, 0.4), new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.6 }));
+        bumper.position.set(0, -0.1, 1.05); agvGroup.add(bumper);
+        // add visible lidar ring
+        const ring = new THREE.Mesh(new THREE.RingGeometry(0.6, 0.9, 24), new THREE.MeshStandardMaterial({ emissive: 0x00ffff, emissiveIntensity: 0.6, side: THREE.DoubleSide }));
+        ring.rotation.x = Math.PI / 2; ring.position.y = 0.82; agvGroup.add(ring);
         agvGroup.add(body);
 
         const wheelGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.5, 16);
@@ -512,32 +666,128 @@ class Simulation {
         this.dom.ueSelect.add(new Option(id, id));
     }
 
+    // --- REPLACE _assignNewTask ---
     _assignNewTask(agv) {
         const bound = this.params.factorySize / 2 - 2;
-        if (agv.userData.battery_percentage < 20) {
+        if (agv.userData.battery_percentage < 20 && this.chargingStations.length > 0) {
             agv.userData.task = 'Charging';
             agv.userData.targetPosition = this.chargingStations[0].position.clone();
             this.log(`${agv.userData.id} battery low. Moving to charging station.`, 'WARN');
         } else {
             agv.userData.task = UTILS.getRandom(CONFIGS.agvTasks);
-            agv.userData.targetPosition = UTILS.getRandom(this.workstations).position.clone();
+            // pick random workstation
+            if (this.workstations.length === 0) {
+                agv.userData.targetPosition = new THREE.Vector3(
+                    UTILS.clamp((Math.random()-0.5) * this.params.factorySize, -bound, bound),
+                    0.5,
+                    UTILS.clamp((Math.random()-0.5) * this.params.factorySize, -bound, bound)
+                );
+            } else {
+                agv.userData.targetPosition = UTILS.getRandom(this.workstations).position.clone();
+            }
         }
+
         agv.userData.targetPosition.x = UTILS.clamp(agv.userData.targetPosition.x, -bound, bound);
         agv.userData.targetPosition.z = UTILS.clamp(agv.userData.targetPosition.z, -bound, bound);
         agv.userData.status = 'Moving';
+
+        // build nav grid and compute path
+        this._buildNavGrid();
+        const path = this._findPathWorld(agv.position, agv.userData.targetPosition);
+        if (path && path.length > 0) {
+            agv.userData.path = path;
+            agv.userData.pathIndex = 0;
+            // optional: visualize small markers (comment if not desired)
+            //agv.userData._pathHelpers = path.map(p => { const m = new THREE.Mesh(new THREE.SphereGeometry(0.2,6,6), new THREE.MeshStandardMaterial({emissive:0x00ff00})); m.position.copy(p); this.scene.add(m); return m; });
+        } else {
+            // fallback: if no path found, assign wandering target to avoid permanent stuck
+            this.log(`${agv.userData.id} path not found. Assigning fallback target.`, 'WARN');
+            agv.userData.path = null;
+            setTimeout(()=> this._assignNewTask(agv), 500 + Math.random() * 1500);
+        }
     }
 
-    _updateAGVState(agv, delta) {                
-        if (!this.isPaused) agv.userData.battery_percentage -= delta * 0.1;
-        
-        if (agv.userData.targetPosition) {
+    // --- REPLACE _updateAGVState ---
+    _updateAGVState(agv, delta) {
+        if (!this.isPaused) agv.userData.battery_percentage = Math.max(0, agv.userData.battery_percentage - delta * 0.1);
+
+        if (!agv.userData.targetPosition) return;
+
+        // follow path if exists
+        if (agv.userData.path && agv.userData.path.length > 0) {
+            const idx = agv.userData.pathIndex || 0;
+            const waypoint = agv.userData.path[idx];
+            if (!waypoint) { agv.userData.path = null; agv.userData.pathIndex = 0; return; }
+
+            const dirVec = waypoint.clone().sub(agv.position); dirVec.y = 0;
+            const dist = dirVec.length();
+            if (dist < (this._navConfig.cellSize * 0.6)) {
+                // reached waypoint
+                agv.userData.pathIndex = idx + 1;
+                if (agv.userData.pathIndex >= agv.userData.path.length) {
+                    // reached destination
+                    agv.userData.targetPosition = null;
+                    agv.userData.path = null;
+                    agv.userData.pathIndex = 0;
+                    agv.userData.stuck_timer = 0;
+                    agv.userData.status = 'Idle';
+                    if (agv.userData.task === 'Charging') {
+                        // start charging
+                    } else {
+                        setTimeout(()=> this._assignNewTask(agv), 800 + Math.random() * 1200);
+                    }
+                    return;
+                }
+            } else {
+                // attempt to move towards waypoint while checking collisions ahead
+                const direction = dirVec.clone().normalize();
+                this.raycaster.set(agv.position, direction);
+                const intersections = this.raycaster.intersectObjects(this.collidableObjects, false);
+                const collisionDistance = 1.2 * this._navConfig.cellSize; // safe lookahead
+                if (intersections.length > 0 && intersections[0].distance < collisionDistance) {
+                    agv.userData.stuck_timer += delta;
+                    if (agv.userData.stuck_timer > 0.8) {
+                        // obstruction detected on path. Rebuild nav grid and replan to current target
+                        this.log(`${agv.userData.id} obstruction on path; replanning.`, 'DEBUG');
+                        this._buildNavGrid();
+                        const newPath = this._findPathWorld(agv.position, agv.userData.targetPosition);
+                        if (newPath && newPath.length > 0) {
+                            agv.userData.path = newPath;
+                            agv.userData.pathIndex = 0;
+                            agv.userData.stuck_timer = 0;
+                        } else {
+                            // can't replan; pick a new task
+                            this.log(`${agv.userData.id} cannot replan. Assigning new task.`, 'WARN');
+                            this._assignNewTask(agv);
+                            agv.userData.stuck_timer = 0;
+                        }
+                    }
+                } else {
+                    agv.userData.stuck_timer = 0;
+                    // movement
+                    const moveDist = agv.userData.speed * delta;
+                    agv.position.add(direction.multiplyScalar(moveDist));
+                    // orientation
+                    agv.lookAt(agv.position.clone().add(direction));
+                    // clamp to boundaries
+                    const bound = this.params.factorySize / 2 - 2;
+                    agv.position.x = UTILS.clamp(agv.position.x, -bound, bound);
+                    agv.position.z = UTILS.clamp(agv.position.z, -bound, bound);
+                    // rotate wheels if present
+                    agv.traverse((c) => {
+                        if (c.geometry && c.geometry.type === "CylinderGeometry") {
+                            c.rotation.x -= moveDist / 0.5; // wheel rotation heuristic
+                        }
+                    });
+                }
+            }
+        } else {
+            // original fallback: straight-line motion with raycast; keep but reduce step
             const direction = agv.userData.targetPosition.clone().sub(agv.position);
             direction.y = 0;
-
             if (direction.length() < 1.5) {
                 agv.userData.stuck_timer = 0;
                 agv.userData.status = 'Idle';
-                
                 if (agv.userData.task === 'Charging') {
                     if (agv.userData.battery_percentage < 100) agv.userData.battery_percentage += delta * 10;
                     else { this.log(`${agv.userData.id} fully charged.`, 'SUCCESS'); this._assignNewTask(agv); }
@@ -545,16 +795,18 @@ class Simulation {
                     setTimeout(() => this._assignNewTask(agv), 1000 + Math.random() * 2000);
                 }
                 agv.userData.targetPosition = null;
-            
             } else {
-                agv.userData.status = 'Moving';
+                // try to replan using grid
+                this._buildNavGrid();
+                const newPath = this._findPathWorld(agv.position, agv.userData.targetPosition);
+                if (newPath && newPath.length > 0) {
+                    agv.userData.path = newPath; agv.userData.pathIndex = 0; return;
+                }
+                // otherwise use cautious straight move
                 direction.normalize();
-
                 this.raycaster.set(agv.position, direction);
                 const intersections = this.raycaster.intersectObjects(this.collidableObjects);
-                const collisionDistance = 2.5;
-
-                if (intersections.length > 0 && intersections[0].distance < collisionDistance) {
+                if (intersections.length > 0 && intersections[0].distance < 2.0) {
                     agv.userData.stuck_timer += delta;
                     if (agv.userData.stuck_timer > 2.0) {
                         this.log(`${agv.userData.id} is stuck, rerouting...`, 'EVENT');
@@ -565,8 +817,6 @@ class Simulation {
                     agv.userData.stuck_timer = 0;
                     agv.position.add(direction.multiplyScalar(agv.userData.speed * delta));
                     agv.lookAt(agv.position.clone().add(direction));
-
-                    // <-- NEW: Enforce factory boundaries -->
                     const bound = this.params.factorySize / 2 - 2;
                     agv.position.x = UTILS.clamp(agv.position.x, -bound, bound);
                     agv.position.z = UTILS.clamp(agv.position.z, -bound, bound);
