@@ -964,9 +964,11 @@ class Simulation {
     _animate() {
         requestAnimationFrame(() => this._animate());
         const delta = this.clock.getDelta();
-        
-        if (delta > 0) { 
-            if (!this.isPaused) {
+
+        if (delta > 0) 
+        { 
+            if (!this.isPaused) 
+            {
                 this.agvs.forEach(agv => this._updateAGVState(agv, delta));
                 this._updateConnectivity();
             }
